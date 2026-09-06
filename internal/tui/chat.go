@@ -102,6 +102,9 @@ type Model struct {
 	w, h      int
 	focus     focusTarget
 	showPanel bool
+	// follow: вьюпорт сам прокручивается к новым строкам. Сбрасывается,
+	// когда читатель отлистал вверх, и возвращается на низу.
+	follow bool
 
 	// history хранит только реплики user/assistant. Системный промпт
 	// подставляется из настроек в момент отправки — поэтому его правка
@@ -135,6 +138,7 @@ func NewModel(o Options) *Model {
 
 	m := &Model{
 		opts: o, set: o.Settings, ta: ta, sp: sp, showPanel: true,
+		follow:    true,
 		help:      newHelp(),
 		keys:      newChatKeys(len(o.Settings.Catalog) > 1),
 		panelKeys: newPanelKeys("в диалог"),
@@ -240,6 +244,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finish(msg.resp, msg.err)
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		m.follow = m.vp.AtBottom()
+		return m, cmd
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.sp, cmd = m.sp.Update(msg)
@@ -343,13 +353,24 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ta.Reset()
+		m.follow = true
 		return m, m.send(text)
 	case "ctrl+j":
 		m.ta.InsertString("\n")
 		return m, nil
+	case "end":
+		m.vp.GotoBottom()
+		m.follow = true
+		return m, nil
+	case "home":
+		m.vp.GotoTop()
+		m.follow = false
+		return m, nil
 	case "pgup", "pgdown", "shift+up", "shift+down":
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
+		// Вернулись к низу — снова следуем за новыми строками.
+		m.follow = m.vp.AtBottom()
 		return m, cmd
 	}
 
@@ -656,9 +677,10 @@ func (m *Model) View() tea.View {
 	rows = append(rows,
 		m.frame(m.focus == focusInput).Width(m.w-2).Render(m.ta.View()),
 		stStatus.Render(m.status()))
-	// В v2 альт-экран — свойство вида, а не опция программы.
+	// В v2 альт-экран и мышь — свойства вида, а не опции программы.
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -693,8 +715,13 @@ func (m *Model) status() string {
 	case m.focus == focusNotes:
 		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
 	default:
-		left = shortHelp(m.help, m.keys.Send, m.keys.Cycle, m.keys.Bench,
-			m.keys.Reset, m.keys.Clear, m.keys.Quit)
+		left = shortHelp(m.help, m.keys.Send, m.keys.Scroll, m.keys.Cycle,
+			m.keys.Bench, m.keys.Reset, m.keys.Quit)
+	}
+	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
+	// подсказываем, чем вернуться.
+	if !m.follow {
+		left = stNote.Render("↑ отлистано, End — к последнему ответу") + "  " + left
 	}
 	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
 		m.tot.calls, m.tot.prompt, m.tot.completion, m.tot.cost)

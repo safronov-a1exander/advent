@@ -147,6 +147,15 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		l.refresh()
 		return l, nil
 
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		if l.showTbl && l.res != nil {
+			l.summary, cmd = l.summary.Update(msg)
+		} else {
+			l.vp, cmd = l.vp.Update(msg)
+		}
+		return l, cmd
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		l.sp, cmd = l.sp.Update(msg)
@@ -254,6 +263,12 @@ func (l *Lab) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		l.vp, cmd = l.vp.Update(msg)
 		return l, cmd
+	case "home":
+		l.vp.GotoTop()
+		return l, nil
+	case "end":
+		l.vp.GotoBottom()
+		return l, nil
 	}
 	return l, nil
 }
@@ -558,14 +573,15 @@ func (l *Lab) View() tea.View {
 	case l.dirty:
 		status = "параметры изменены — нажми r, чтобы прогнать заново"
 	default:
-		status = shortHelp(l.help, l.keys.Run, l.keys.Variant, l.keys.Summary,
-			l.keys.Cycle, l.keys.Quit)
+		status = shortHelp(l.help, l.keys.Run, l.keys.Variant, l.keys.Scroll,
+			l.keys.Summary, l.keys.Cycle, l.keys.Quit)
 	}
 
 	rows = append(rows, stStatus.Render(status))
-	// В v2 альт-экран — свойство вида, а не опция программы.
+	// В v2 альт-экран и мышь — свойства вида, а не опции программы.
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 

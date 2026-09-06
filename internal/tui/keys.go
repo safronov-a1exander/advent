@@ -15,6 +15,7 @@ import (
 type chatKeys struct {
 	Send    key.Binding
 	Newline key.Binding
+	Scroll  key.Binding
 	Cycle   key.Binding
 	Back    key.Binding
 	Panel   key.Binding
@@ -44,6 +45,7 @@ type notesKeys struct {
 
 type labKeys struct {
 	Run     key.Binding
+	Scroll  key.Binding
 	Variant key.Binding
 	Summary key.Binding
 	Cycle   key.Binding
@@ -55,13 +57,15 @@ func newChatKeys(withBench bool) chatKeys {
 	k := chatKeys{
 		Send:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "отправить")),
 		Newline: key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("Ctrl+J", "перенос")),
-		Cycle:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
-		Back:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
-		Panel:   key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
-		Bench:   key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
-		Reset:   key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
-		Clear:   key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
-		Quit:    key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
+		Scroll: key.NewBinding(key.WithKeys("pgup", "pgdown", "shift+up", "shift+down"),
+			key.WithHelp("PgUp/PgDn", "прокрутка")),
+		Cycle: key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
+		Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
+		Panel: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
+		Bench: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
+		Reset: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
+		Clear: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
+		Quit:  key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
 	}
 	// Сравнение моделей появляется только там, где оно реализовано:
 	// подсказка не должна обещать клавишу, которой нет.
@@ -95,7 +99,9 @@ func newNotesKeys(backHelp string) notesKeys {
 
 func newLabKeys() labKeys {
 	return labKeys{
-		Run:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "прогнать")),
+		Run: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "прогнать")),
+		Scroll: key.NewBinding(key.WithKeys("pgup", "pgdown"),
+			key.WithHelp("PgUp/PgDn", "прокрутка")),
 		Variant: key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "вариант")),
 		Summary: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "сводка")),
 		Cycle:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
