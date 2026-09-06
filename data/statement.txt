@@ -1,3 +1,4 @@
+31.08 OZON MARKETPLACE                     1990.00 RUB
 05.09 PYATEROCHKA 5643 MOSCOW RUS          2340.00 RUB
 05.09 DRINKIT COFFEE MSK                    390.00 RUB
 06.09 YANDEX.TAXI                           620.00 RUB
@@ -10,3 +11,5 @@
 12.09 SPORTLIFE ABONEMENT 1M               3500.00 RUB
 13.09 RZD TICKET 2E                        2960.00 RUB
 14.09 YANDEX EDA REFUND                    -480.00 RUB
+15.09 ATM CASH WITHDRAWAL                  5000.00 RUB
+16.09 SPOTIFY PREMIUM                        10.00 USD

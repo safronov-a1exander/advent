@@ -19,6 +19,9 @@ import (
 type Field struct {
 	Label string
 	Hint  string
+	// HintFn — подсказка, зависящая от текущего значения. Если задана,
+	// используется вместо Hint.
+	HintFn func() string
 
 	// Value — как параметр показывается в панели.
 	Value func() string
@@ -29,6 +32,13 @@ type Field struct {
 	// Если Text == nil, поле правится только стрелками.
 	Text    func() string
 	SetText func(string) error
+}
+
+func (f Field) hint() string {
+	if f.HintFn != nil {
+		return f.HintFn()
+	}
+	return f.Hint
 }
 
 // ---- конструкторы под типовые параметры ----
