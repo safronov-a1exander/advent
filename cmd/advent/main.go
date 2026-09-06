@@ -32,6 +32,9 @@ func usage() {
   advent <команда> [флаги]
 
 Команды:
+  ask       одиночный запрос в LLM, ответ в консоль        (день 1)
+  chat      интерактивный TUI с потоковым ответом          (день 1)
+  demo      прогон сценария в TUI — для записи видео       (день 1)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -54,6 +57,12 @@ func run() error {
 	args := os.Args[2:]
 
 	switch cmd {
+	case "ask":
+		return cmdAsk(ctx, args)
+	case "chat":
+		return cmdChat(ctx, args)
+	case "demo":
+		return cmdDemo(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":
