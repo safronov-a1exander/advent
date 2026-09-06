@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safronov-a1exander/advent/internal/metrics"
 	"github.com/safronov-a1exander/advent/internal/runner"
 )
 
@@ -28,6 +29,12 @@ type Row struct {
 	Passed   int    // прогонов, где все проверки прошли
 	Checks   string // «прошло/всего»
 	OK       bool
+	// Similarity — среднее попарное сходство ответов между повторами.
+	// 1.00 — модель повторяется дословно, 0.00 — каждый раз новый текст.
+	// Считается только при repeat > 1.
+	Similarity float64
+	Identical  bool
+	Empty      bool // ни одного непустого ответа
 }
 
 func Rows(res *runner.Result) []Row {
@@ -35,6 +42,7 @@ func Rows(res *runner.Result) []Row {
 		row   Row
 		msSum int64
 		fails int
+		texts []string
 	}
 	order := []string{}
 	m := map[string]*agg{}
@@ -56,7 +64,8 @@ func Rows(res *runner.Result) []Row {
 		g.row.ReasTok += a.Usage.ReasoningTokens
 		g.row.Cost += a.CostUSD
 		g.row.Finish = a.Finish
-		if a.Err != nil || !a.ChecksOK() {
+		g.texts = append(g.texts, a.Final)
+		if a.Failed() {
 			g.fails++
 		} else {
 			g.row.Passed++
@@ -73,6 +82,15 @@ func Rows(res *runner.Result) []Row {
 		// доля успешных прогонов: при repeat > 1 это и есть «стабильность
 		// способа», главная метрика дня 3
 		g.row.Checks = fmt.Sprintf("%d/%d", g.row.Passed, g.row.Attempts)
+		g.row.Similarity = metrics.MeanSimilarity(g.texts)
+		g.row.Identical = metrics.AllIdentical(g.texts)
+		g.row.Empty = true
+		for _, t := range g.texts {
+			if strings.TrimSpace(t) != "" {
+				g.row.Empty = false
+				break
+			}
+		}
 		out = append(out, g.row)
 	}
 	return out
@@ -82,13 +100,21 @@ func Rows(res *runner.Result) []Row {
 func Table(res *runner.Result) string {
 	rows := Rows(res)
 	head := []string{"ВАРИАНТ", "МОДЕЛЬ", "ПАРАМЕТРЫ", "СРЕД.МС", "IN", "OUT", "REAS", "$", "FINISH", "УСПЕХ"}
+	multi := res.Scenario.Repeat > 1
+	if multi {
+		head = append(head, "СХОДСТВО")
+	}
 	data := [][]string{}
 	for _, r := range rows {
-		data = append(data, []string{
+		row := []string{
 			r.Label, short(r.Model, 24), short(r.Params, 34),
 			fmt.Sprint(r.AvgMS), fmt.Sprint(r.InTok), fmt.Sprint(r.OutTok),
 			fmt.Sprint(r.ReasTok), fmt.Sprintf("%.6f", r.Cost), r.Finish, r.Checks,
-		})
+		}
+		if multi {
+			row = append(row, simText(r))
+		}
+		data = append(data, row)
 	}
 	return grid(head, data)
 }
@@ -228,6 +254,18 @@ func noteOf(res *runner.Result, id string) string {
 		}
 	}
 	return ""
+}
+
+// simText: у идентичных ответов пишем это словом — в видео читается лучше
+// любого числа.
+func simText(r Row) string {
+	if r.Empty {
+		return "—" // ответов нет: сравнивать нечего (например ожидаемая ошибка API)
+	}
+	if r.Identical {
+		return "1.00 (совпали)"
+	}
+	return fmt.Sprintf("%.2f", r.Similarity)
 }
 
 func runeLen(s string) int { return len([]rune(s)) }

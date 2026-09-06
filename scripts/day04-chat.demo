@@ -1,0 +1,104 @@
+# День 4, часть 3 — температура крутится руками, без перезапуска.
+
+speed 16ms
+sleep 1500ms
+
+note Один и тот же запрос про экономию при разных температурах. Значение вводится прямо в панели.
+sleep 6s
+
+note Сначала отключим рассуждения: с ними ответ при нуле каждый раз свой, потому что своя и цепочка рассуждений.
+sleep 6s
+key tab
+sleep 1200ms
+key down
+sleep 400ms
+key down
+sleep 400ms
+key down
+sleep 400ms
+key down
+sleep 400ms
+key down
+sleep 400ms
+key down
+sleep 1200ms
+key left
+sleep 2s
+
+note thinking=disabled. Теперь спускаемся к temperature.
+sleep 4s
+key up
+sleep 500ms
+key up
+sleep 1200ms
+key enter
+sleep 1200ms
+type 0
+sleep 800ms
+key enter
+sleep 2s
+
+note temperature = 0. Жадное декодирование: всегда самый вероятный токен.
+sleep 5s
+key esc
+sleep 1s
+type За месяц я потратил 1480 на доставку еды, 390 на кофе навынос и 3500 на абонемент в спортзал, которым почти не пользуюсь. Придумай три необычных способа сократить эти траты. Три строки, каждая с «— ».
+sleep 1s
+key enter
+wait 300s
+sleep 4s
+
+note Тот же запрос ещё раз при том же нуле: разброс минимален, но дословного совпадения не бывает.
+sleep 4s
+key ctrl+r
+sleep 1s
+type За месяц я потратил 1480 на доставку еды, 390 на кофе навынос и 3500 на абонемент в спортзал, которым почти не пользуюсь. Придумай три необычных способа сократить эти траты. Три строки, каждая с «— ».
+sleep 1s
+key enter
+wait 300s
+sleep 5s
+
+note Теперь 1.2 — выше дефолта DeepSeek.
+sleep 3s
+key tab
+sleep 1200ms
+key enter
+sleep 1200ms
+type 1.2
+sleep 800ms
+key enter
+sleep 1500ms
+key esc
+sleep 1s
+key ctrl+r
+sleep 800ms
+type За месяц я потратил 1480 на доставку еды, 390 на кофе навынос и 3500 на абонемент в спортзал, которым почти не пользуюсь. Придумай три необычных способа сократить эти траты. Три строки, каждая с «— ».
+sleep 1s
+key enter
+wait 300s
+sleep 5s
+
+note Идеи смелее, но формат уже плывёт. А теперь вылезем за диапазон: 2.5.
+sleep 4s
+key tab
+sleep 1200ms
+key enter
+sleep 1200ms
+type 2.5
+sleep 800ms
+key enter
+sleep 1500ms
+key esc
+sleep 1s
+type Тот же вопрос.
+sleep 800ms
+key enter
+wait 120s
+sleep 4s
+
+note API не обрезает молча, а отдаёт 400 с текстом про допустимый диапазон.
+sleep 8s
+
+note Температура — не «ползунок креативности», а ширина распределения при выборе токена.
+sleep 8s
+quit

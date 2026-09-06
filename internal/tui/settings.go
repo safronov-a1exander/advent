@@ -33,6 +33,12 @@ type Settings struct {
 	// описаны явно через steps.
 	Strategy string
 
+	// День 4 — сэмплирование.
+	Temperature *float64
+	TopP        *float64
+	Thinking    string
+	Seed        *int
+
 	// Повторов на вариант; только для lab, 0 = как в сценарии.
 	Repeat int
 }
@@ -117,6 +123,32 @@ func (s *Settings) Fields() []Field {
 	}
 
 	f = append(f,
+		// hardMax 3.0 при штатном потолке DeepSeek 2.0 — намеренно:
+		// иногда нужно вылезти за диапазон и получить 400 от API.
+		FloatField("temperature",
+			"ширина распределения при выборе следующего токена; у DeepSeek диапазон [0, 2], выше — ошибка 400",
+			func() *float64 { return s.Temperature },
+			func(v *float64) { s.Temperature = v },
+			0.1, 0, 3.0, 0.7),
+
+		FloatField("top_p",
+			"nucleus sampling: берём токены, пока их суммарная вероятность не наберёт top_p",
+			func() *float64 { return s.TopP },
+			func(v *float64) { s.TopP = v },
+			0.05, 0.05, 1.0, 0.9),
+
+		EnumField("thinking",
+			"disabled убирает рассуждения; без этого reasoning-токены съедают лимит max_tokens",
+			[]string{"", "enabled", "disabled"},
+			func() string { return s.Thinking },
+			func(v string) { s.Thinking = v }),
+
+		IntField("seed",
+			"фиксирует сэмплирование; помогает воспроизводимости, но детерминизм не гарантирован",
+			func() *int { return s.Seed },
+			func(v *int) { s.Seed = v },
+			1, 0, 1000000, 42),
+
 		IntField("max_tokens",
 			"потолок длины ответа; при упоре finish_reason становится length, а не stop",
 			func() *int { return s.MaxTokens },
@@ -171,6 +203,14 @@ func splitList(v string) []string {
 // Apply переносит настройки в запрос к API.
 func (s *Settings) Apply(req *llm.Request) {
 	req.Model = s.Model
+	req.Temperature = s.Temperature
+	req.TopP = s.TopP
+	req.Seed = s.Seed
+	if s.Thinking != "" {
+		req.Thinking = &llm.Thinking{Type: s.Thinking}
+	} else {
+		req.Thinking = nil
+	}
 	req.MaxTokens = s.MaxTokens
 	req.Stop = s.Stop
 	if s.ResponseFormat != "" {
@@ -186,6 +226,18 @@ func (s *Settings) Summary() string {
 	var parts []string
 	if s.Strategy != "" {
 		parts = append(parts, s.Strategy)
+	}
+	if s.Temperature != nil {
+		parts = append(parts, fmt.Sprintf("t=%g", *s.Temperature))
+	}
+	if s.TopP != nil {
+		parts = append(parts, fmt.Sprintf("top_p=%g", *s.TopP))
+	}
+	if s.Thinking != "" {
+		parts = append(parts, "think="+s.Thinking)
+	}
+	if s.Seed != nil {
+		parts = append(parts, fmt.Sprintf("seed=%d", *s.Seed))
 	}
 	if s.MaxTokens != nil {
 		parts = append(parts, fmt.Sprintf("max=%d", *s.MaxTokens))

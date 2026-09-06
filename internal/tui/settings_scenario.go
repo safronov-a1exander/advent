@@ -14,6 +14,22 @@ func (s *Settings) ScenarioOverride() *scenario.Params {
 	p := &scenario.Params{}
 	touched := false
 
+	if s.Temperature != nil {
+		p.Temperature = s.Temperature
+		touched = true
+	}
+	if s.TopP != nil {
+		p.TopP = s.TopP
+		touched = true
+	}
+	if s.Thinking != "" {
+		p.Thinking = s.Thinking
+		touched = true
+	}
+	if s.Seed != nil {
+		p.Seed = s.Seed
+		touched = true
+	}
 	if s.MaxTokens != nil {
 		p.MaxTokens = s.MaxTokens
 		touched = true

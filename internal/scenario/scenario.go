@@ -111,12 +111,16 @@ type Checks struct {
 	MustContain    []string `yaml:"must_contain"`
 	MustNotContain []string `yaml:"must_not_contain"`
 	FinishReason   string   `yaml:"finish_reason"` // ожидаемый finish_reason
+	// ExpectError — вариант считается успешным, если API вернул ошибку
+	// с этой подстрокой. Нужен, чтобы показать границы параметров
+	// (например temperature вне [0, 2]) как заявленный результат, а не сбой.
+	ExpectError string `yaml:"expect_error"`
 }
 
 func (c Checks) Empty() bool {
 	return !c.JSON && c.ArrayPath == "" && len(c.RequiredFields) == 0 &&
 		c.MaxWords == 0 && c.MaxChars == 0 && len(c.MustContain) == 0 &&
-		len(c.MustNotContain) == 0 && c.FinishReason == ""
+		len(c.MustNotContain) == 0 && c.FinishReason == "" && c.ExpectError == ""
 }
 
 // Step — один вызов LLM внутри варианта.

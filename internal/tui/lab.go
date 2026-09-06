@@ -424,7 +424,7 @@ func (l *Lab) listView() string {
 		case len(done) > 0:
 			ok := true
 			for _, di := range done {
-				if l.attempts[di].Err != nil || !l.attempts[di].ChecksOK() {
+				if l.attempts[di].Failed() {
 					ok = false
 				}
 			}
