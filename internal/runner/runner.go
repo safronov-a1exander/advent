@@ -47,6 +47,18 @@ type Attempt struct {
 	Finish    string
 	Checks    []CheckResult
 	Err       error
+	// ExpectedErr: ошибка API была заявлена в checks.expect_error —
+	// значит вариант отработал так, как задумано.
+	ExpectedErr bool
+}
+
+// Failed — прогон считается провальным, если упал неожиданно
+// или не прошёл хотя бы одну проверку.
+func (a Attempt) Failed() bool {
+	if a.Err != nil && !a.ExpectedErr {
+		return true
+	}
+	return !a.ChecksOK()
 }
 
 func (a Attempt) ChecksOK() bool {
@@ -188,6 +200,16 @@ func (r *Runner) runVariant(ctx context.Context, s *scenario.Scenario, v scenari
 			a.Err = fmt.Errorf("шаг %d: %w", i+1, err)
 			rec.Error = err.Error()
 			r.log(rec)
+
+			if want := s.EffectiveChecks(v).ExpectError; want != "" {
+				ok := strings.Contains(err.Error(), want)
+				a.ExpectedErr = ok
+				a.Checks = []CheckResult{{
+					Name:   "ожидаемая ошибка API: " + want,
+					OK:     ok,
+					Detail: err.Error(),
+				}}
+			}
 			return a
 		}
 
@@ -300,6 +322,14 @@ func Verify(c scenario.Checks, content, finish string) []CheckResult {
 	}
 	for _, s := range c.MustNotContain {
 		out = append(out, CheckResult{Name: "не содержит " + quote(s), OK: !strings.Contains(body, s)})
+	}
+	if c.ExpectError != "" {
+		// сюда попадаем, только если ошибки не было — а её ждали
+		out = append(out, CheckResult{
+			Name:   "ожидаемая ошибка API: " + c.ExpectError,
+			OK:     false,
+			Detail: "запрос прошёл без ошибки",
+		})
 	}
 	if c.FinishReason != "" {
 		out = append(out, CheckResult{

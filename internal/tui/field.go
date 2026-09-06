@@ -235,6 +235,11 @@ type Panel struct {
 	editing bool
 	input   textinput.Model
 	err     string
+	// fresh — значение подставлено в поле ввода и ещё не правилось.
+	// Первый же напечатанный символ его затирает: так ведёт себя выделенный
+	// текст в обычных формах. Без этого ввод дописывается к старому значению
+	// и «1.2» плюс «2.5» превращается в «1.22.5».
+	fresh bool
 	// Changed взводится при любом изменении значения — экран может
 	// показать, что настройки разошлись с последним прогоном.
 	Changed bool
@@ -267,7 +272,7 @@ func (p *Panel) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 	if p.editing {
 		switch msg.String() {
-		case "esc":
+		case "esc", "tab":
 			p.editing = false
 			p.err = ""
 			return nil, true
@@ -282,6 +287,12 @@ func (p *Panel) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
 			p.editing = false
 			p.err = ""
 			return nil, true
+		}
+		if p.fresh && msg.Type == tea.KeyRunes {
+			p.input.SetValue("")
+			p.fresh = false
+		} else if msg.Type != tea.KeyRunes {
+			p.fresh = false
 		}
 		var cmd tea.Cmd
 		p.input, cmd = p.input.Update(msg)
@@ -316,6 +327,7 @@ func (p *Panel) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
 			p.input.SetValue(f.Text())
 			p.input.CursorEnd()
 			p.editing = true
+			p.fresh = true
 			p.err = ""
 			return p.input.Focus(), true
 		}
