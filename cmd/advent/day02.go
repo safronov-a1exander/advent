@@ -33,7 +33,7 @@ type runFlags struct {
 func bindRun(fs *flag.FlagSet) *runFlags {
 	r := &runFlags{commonFlags: bindCommon(fs)}
 	fs.StringVar(&r.scenarioPath, "scenario", "", "путь к YAML-сценарию")
-	fs.StringVar(&r.model, "model", "", "переопределить модель для всех вариантов")
+	fs.StringVar(&r.model, "model", "", "прогнать все варианты на этой модели, игнорируя ту, что в сценарии")
 	fs.IntVar(&r.repeat, "repeat", 0, "переопределить число повторов")
 	fs.StringVar(&r.runID, "run", "", "имя журнала в runs/")
 	fs.BoolVar(&r.noReport, "no-report", false, "не сохранять markdown-отчёт")
@@ -49,9 +49,9 @@ func (r *runFlags) build() (*scenario.Scenario, *runner.Runner, *store.Writer, *
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if r.model != "" {
-		sc.Model = r.model
-	}
+	// Флаг бьёт и модель варианта: иначе «прогони всё на flash» не работало бы
+	// для сценариев, где модель задана у каждого варианта отдельно.
+	modelOverride := r.model
 	if r.repeat > 0 {
 		sc.Repeat = r.repeat
 	}
@@ -79,10 +79,12 @@ func (r *runFlags) build() (*scenario.Scenario, *runner.Runner, *store.Writer, *
 	}
 
 	rn := &runner.Runner{
-		Client:   client,
-		Provider: prov.Name,
-		Store:    w,
-		Fallback: prov.DefaultMod,
+		Client:        client,
+		Provider:      prov.Name,
+		Store:         w,
+		Fallback:      prov.DefaultMod,
+		Models:        prov.PricingMap(),
+		ModelOverride: modelOverride,
 	}
 	return sc, rn, w, cfg, prov, nil
 }

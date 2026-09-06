@@ -35,6 +35,10 @@ type Row struct {
 	Similarity float64
 	Identical  bool
 	Empty      bool // ни одного непустого ответа
+	// TokPerSec — скорость генерации: completion-токены, делённые на
+	// время ответа. Главная метрика «быстрее/медленнее» в дне 5,
+	// потому что абсолютная задержка зависит ещё и от длины ответа.
+	TokPerSec float64
 }
 
 func Rows(res *runner.Result) []Row {
@@ -84,6 +88,9 @@ func Rows(res *runner.Result) []Row {
 		g.row.Checks = fmt.Sprintf("%d/%d", g.row.Passed, g.row.Attempts)
 		g.row.Similarity = metrics.MeanSimilarity(g.texts)
 		g.row.Identical = metrics.AllIdentical(g.texts)
+		if g.msSum > 0 {
+			g.row.TokPerSec = float64(g.row.OutTok) / (float64(g.msSum) / 1000)
+		}
 		g.row.Empty = true
 		for _, t := range g.texts {
 			if strings.TrimSpace(t) != "" {
@@ -99,7 +106,7 @@ func Rows(res *runner.Result) []Row {
 // Table рисует сводку моноширинной таблицей — читается прямо в видео.
 func Table(res *runner.Result) string {
 	rows := Rows(res)
-	head := []string{"ВАРИАНТ", "МОДЕЛЬ", "ПАРАМЕТРЫ", "СРЕД.МС", "IN", "OUT", "REAS", "$", "FINISH", "УСПЕХ"}
+	head := []string{"ВАРИАНТ", "МОДЕЛЬ", "ПАРАМЕТРЫ", "СРЕД.МС", "ТОК/С", "IN", "OUT", "REAS", "$", "FINISH", "УСПЕХ"}
 	multi := res.Scenario.Repeat > 1
 	if multi {
 		head = append(head, "СХОДСТВО")
@@ -108,7 +115,8 @@ func Table(res *runner.Result) string {
 	for _, r := range rows {
 		row := []string{
 			r.Label, short(r.Model, 24), short(r.Params, 34),
-			fmt.Sprint(r.AvgMS), fmt.Sprint(r.InTok), fmt.Sprint(r.OutTok),
+			fmt.Sprint(r.AvgMS), tokText(r),
+			fmt.Sprint(r.InTok), fmt.Sprint(r.OutTok),
 			fmt.Sprint(r.ReasTok), fmt.Sprintf("%.6f", r.Cost), r.Finish, r.Checks,
 		}
 		if multi {
@@ -171,11 +179,24 @@ func Markdown(res *runner.Result) string {
 		res.Finished.Sub(res.Started).Round(time.Millisecond))
 
 	b.WriteString("## Сводка\n\n")
-	b.WriteString("| вариант | модель | параметры | сред. мс | in | out | reasoning | $ | finish | проверки |\n")
-	b.WriteString("|---|---|---|---:|---:|---:|---:|---:|---|---|\n")
+	multi := s.Repeat > 1
+	b.WriteString("| вариант | модель | параметры | сред. мс | ток/с | in | out | reasoning | $ | finish | успех |")
+	if multi {
+		b.WriteString(" сходство |")
+	}
+	b.WriteString("\n|---|---|---|---:|---:|---:|---:|---:|---:|---|---|")
+	if multi {
+		b.WriteString("---|")
+	}
+	b.WriteString("\n")
 	for _, r := range Rows(res) {
-		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %d | %d | %d | %d | %.6f | %s | %s |\n",
-			r.Label, r.Model, r.Params, r.AvgMS, r.InTok, r.OutTok, r.ReasTok, r.Cost, r.Finish, r.Checks)
+		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %d | %s | %d | %d | %d | %.6f | %s | %s |",
+			r.Label, r.Model, r.Params, r.AvgMS, tokText(r),
+			r.InTok, r.OutTok, r.ReasTok, r.Cost, r.Finish, r.Checks)
+		if multi {
+			fmt.Fprintf(&b, " %s |", simText(r))
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
@@ -184,6 +205,8 @@ func Markdown(res *runner.Result) string {
 		total += a.CostUSD
 	}
 	fmt.Fprintf(&b, "Итого потрачено за прогон: **$%.6f** (по прайсу из `config.yaml`).\n\n", total)
+
+	b.WriteString(modelsSection(res))
 
 	b.WriteString("## Ответы\n")
 	for _, a := range res.Attempts {
@@ -258,6 +281,16 @@ func noteOf(res *runner.Result, id string) string {
 
 // simText: у идентичных ответов пишем это словом — в видео читается лучше
 // любого числа.
+// tokText: на сверхкоротких ответах (или на заглушке) деление на почти
+// нулевую задержку даёт бессмысленные тысячи токенов в секунду — такие
+// значения не показываем.
+func tokText(r Row) string {
+	if r.AvgMS < 5 || r.OutTok == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f", r.TokPerSec)
+}
+
 func simText(r Row) string {
 	if r.Empty {
 		return "—" // ответов нет: сравнивать нечего (например ожидаемая ошибка API)

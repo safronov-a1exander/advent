@@ -99,6 +99,62 @@ func (s *Settings) strategyField() Field {
 	return f
 }
 
+// tierField — быстрый переход между классами моделей из config.yaml.
+// В задании дня 5 сравнивают «слабую / среднюю / сильную», и держать это
+// отдельным полем удобнее, чем помнить имена моделей.
+func (s *Settings) tierField() Field {
+	tiers := []string{"weak", "medium", "strong"}
+	current := func() string {
+		for _, m := range s.Catalog {
+			if m.ID == s.Model {
+				return m.Tier
+			}
+		}
+		return ""
+	}
+	set := func(t string) {
+		for _, m := range s.Catalog {
+			if m.Tier == t {
+				s.Model = m.ID
+				return
+			}
+		}
+	}
+	idx := func() int {
+		cur := current()
+		for i, t := range tiers {
+			if t == cur {
+				return i
+			}
+		}
+		return -1
+	}
+	return Field{
+		Label: "класс",
+		Hint:  "слабая / средняя / сильная модель из config.yaml; переключает поле «модель»",
+		Value: func() string {
+			if c := current(); c != "" {
+				return c
+			}
+			return "— (нет в конфиге)"
+		},
+		Left: func() {
+			i := idx() - 1
+			if i < 0 {
+				i = len(tiers) - 1
+			}
+			set(tiers[i])
+		},
+		Right: func() {
+			i := idx() + 1
+			if i >= len(tiers) {
+				i = 0
+			}
+			set(tiers[i])
+		},
+	}
+}
+
 // Fields — набор параметров для панели.
 // День 1: из чего состоит запрос. День 2: чем контролируется формат ответа.
 func (s *Settings) Fields() []Field {
@@ -109,6 +165,7 @@ func (s *Settings) Fields() []Field {
 
 	f := []Field{
 		s.modelField(),
+		s.tierField(),
 		TextField("system", sysHint,
 			func() string { return s.System },
 			func(v string) { s.System = v }),

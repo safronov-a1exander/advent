@@ -85,6 +85,11 @@ type ModelInfo struct {
 	MaxContext  int     `json:"max_context" yaml:"max_context"`
 	Reasoning   bool    `json:"reasoning" yaml:"reasoning"`
 	Description string  `json:"description" yaml:"description"`
+	// ParamsB — размер модели в миллиардах параметров, если известен.
+	// Вместе с квантизацией и размером контекста это и есть «класс» модели.
+	ParamsB float64 `json:"params_b" yaml:"params_b"`
+	Quant   string  `json:"quant" yaml:"quant"`
+	URL     string  `json:"url" yaml:"url"` // страница модели — для ссылок в отчёте
 }
 
 type Provider interface {
