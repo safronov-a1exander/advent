@@ -1,0 +1,11 @@
+# Единые окончания строк: в репозитории всегда LF.
+# Без этого Windows-клиент подставляет CRLF и gofmt считает файлы
+# неотформатированными, а git — вечно изменёнными.
+* text=auto eol=lf
+
+# PowerShell читаем Windows PowerShell 5.1 — ему нужны CRLF и BOM,
+# иначе кириллица в скриптах превращается в мусор и ломает парсер.
+*.ps1 text eol=crlf working-tree-encoding=UTF-8
+
+*.mp4 binary
+*.png binary

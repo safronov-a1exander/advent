@@ -1,0 +1,26 @@
+# secrets
+.env
+*.key
+config.local.yaml
+
+# build
+/bin/
+/advent
+/advent.exe
+
+# run artifacts
+/runs/
+/recordings/
+/reports/
+
+# личные заметки и вспомогательные инструменты: в публичный репозиторий
+# не попадают (сюда же уезжает всё, что относится к конкретному потоку курса)
+/docs/private/
+/tools/private/
+/docs/course/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

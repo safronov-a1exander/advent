@@ -1,0 +1,105 @@
+# Конфиг стенда. Секретов здесь нет и быть не должно.
+# Ключ берётся из переменной окружения (api_key_env) либо из config.local.yaml,
+# который лежит в .gitignore.
+
+default_provider: deepseek
+runs_dir: runs
+reports_dir: reports
+
+providers:
+  - name: deepseek
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    default_model: deepseek-v4-flash
+    # Прайс сверен с https://api-docs.deepseek.com/quick_start/pricing
+    # (2026-09-06). У DeepSeek две ставки: пиковая и вдвое дешевле в
+    # непиковые часы (пик — 01:00-04:00 и 06:00-10:00 UTC, пн-пт).
+    # Здесь стоят ПИКОВЫЕ, чтобы колонка стоимости не занижала расход.
+    # Список моделей проверяется командой `advent models`.
+    models:
+      - id: deepseek-v4-flash
+        label: Flash
+        tier: weak
+        in_per_1m: 0.44
+        cached_in_per_1m: 0.014
+        out_per_1m: 1.32
+        max_context: 128000
+        reasoning: true
+        url: https://api-docs.deepseek.com/quick_start/pricing
+        description: дешёвая быстрая модель, дефолт для большинства заданий
+      - id: deepseek-v4-flash-vision-exp
+        label: Flash Vision (exp)
+        tier: medium
+        in_per_1m: 0.44
+        cached_in_per_1m: 0.014
+        out_per_1m: 1.32
+        max_context: 128000
+        reasoning: false
+        url: https://api-docs.deepseek.com/quick_start/pricing
+        description: экспериментальная мультимодальная
+      - id: deepseek-v4-pro
+        label: Pro
+        tier: strong
+        in_per_1m: 1.32
+        cached_in_per_1m: 0.044
+        out_per_1m: 3.96
+        max_context: 128000
+        reasoning: true
+        url: https://api-docs.deepseek.com/quick_start/pricing
+        description: сильная модель, для сравнения качества
+
+  # Резервный провайдер: тот же код, другой base_url.
+  # Пригодится в неделю про локальные модели (llama.cpp/vLLM отдают
+  # OpenAI-совместимый эндпоинт) и если понадобится OpenRouter.
+  - name: openrouter
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    default_model: deepseek/deepseek-chat
+    models: []
+
+  # Локальный инференс (llama.cpp / vLLM / Ollama) — понадобится в неделю
+  # про локальные модели.
+  - name: local
+    base_url: http://127.0.0.1:8080/v1
+    api_key_env: LOCAL_API_KEY
+    default_model: local-model
+    models: []
+
+  # Заглушка `go run ./tools/mockllm` — репетиция демо и запись видео
+  # без траты токенов. Цены выдуманы, чтобы колонка стоимости была не пустой.
+  - name: mock
+    base_url: http://127.0.0.1:8099/v1
+    api_key_env: MOCK_API_KEY
+    api_key: mock
+    default_model: mock-weak
+    models:
+      - id: mock-weak
+        label: Mock Weak
+        tier: weak
+        params_b: 7
+        quant: q4
+        in_per_1m: 0.10
+        cached_in_per_1m: 0.01
+        out_per_1m: 0.20
+        max_context: 32000
+        url: http://127.0.0.1:8099/v1
+      - id: mock-medium
+        label: Mock Medium
+        tier: medium
+        params_b: 32
+        quant: q8
+        in_per_1m: 0.30
+        cached_in_per_1m: 0.03
+        out_per_1m: 0.90
+        max_context: 64000
+        url: http://127.0.0.1:8099/v1
+      - id: mock-strong
+        label: Mock Strong
+        tier: strong
+        params_b: 235
+        quant: fp8
+        in_per_1m: 0.60
+        cached_in_per_1m: 0.06
+        out_per_1m: 2.40
+        max_context: 128000
+        url: http://127.0.0.1:8099/v1
