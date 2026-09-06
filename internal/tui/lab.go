@@ -143,7 +143,7 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		l.showTbl = true
-		l.summary = newSummaryTable(l.res, l.paneW(), l.vp.Height()-4)
+		l.summary = newSummaryTable(l.res, l.w-8, l.vp.Height()-8)
 		l.refresh()
 		return l, nil
 
@@ -223,7 +223,7 @@ func (l *Lab) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		l.showTbl = !l.showTbl
 		if l.showTbl && l.res != nil {
-			l.summary = newSummaryTable(l.res, l.paneW(), l.vp.Height()-4)
+			l.summary = newSummaryTable(l.res, l.w-8, l.vp.Height()-8)
 		}
 		l.refresh()
 	case "up", "k", "down", "j":
@@ -376,9 +376,6 @@ func (l *Lab) frame(focused bool) lipgloss.Style {
 }
 
 func (l *Lab) pane() string {
-	if l.showTbl && l.res != nil {
-		return l.summaryView()
-	}
 	if l.sel >= len(l.sc.Variants) {
 		return ""
 	}
@@ -522,15 +519,23 @@ func (l *Lab) View() tea.View {
 	sub := stDim.Render(short(fmt.Sprintf("вариантов %d · повторов %d · %s",
 		len(l.sc.Variants), repeat, l.set.OverrideSummary()), l.w-1))
 
-	cols := []string{
-		stFrame.Width(l.listW()).Height(l.vp.Height()).Render(l.listView()),
-		l.frame(l.focus == focusInput).Width(l.paneW() + 2).Render(l.vp.View()),
+	var body string
+	if l.showTbl && l.res != nil {
+		// Сводка занимает всю ширину: в три колонки таблица не влезает
+		// и обрезает правые столбцы.
+		body = l.frame(l.focus == focusInput).Width(l.w - 4).
+			Height(l.vp.Height()).Render(l.summaryView())
+	} else {
+		cols := []string{
+			stFrame.Width(l.listW()).Height(l.vp.Height()).Render(l.listView()),
+			l.frame(l.focus == focusInput).Width(l.paneW() + 2).Render(l.vp.View()),
+		}
+		if pw := l.panelW(); pw > 0 {
+			cols = append(cols, l.frame(l.focus == focusPanel).
+				Width(pw).Height(l.vp.Height()).Render(l.panel.View(l.focus == focusPanel)))
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	}
-	if pw := l.panelW(); pw > 0 {
-		cols = append(cols, l.frame(l.focus == focusPanel).
-			Width(pw).Height(l.vp.Height()).Render(l.panel.View(l.focus == focusPanel)))
-	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 
 	rows := []string{head, sub, "", body}
 	if l.notesVisible() {
