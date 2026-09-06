@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -58,6 +59,7 @@ type Lab struct {
 	err      error
 	events   chan tea.Msg
 	showTbl  bool
+	summary  table.Model
 }
 
 type labEventMsg runner.Event
@@ -141,6 +143,7 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		l.showTbl = true
+		l.summary = newSummaryTable(l.res, l.paneW(), l.vp.Height()-4)
 		l.refresh()
 		return l, nil
 
@@ -219,15 +222,32 @@ func (l *Lab) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "t":
 		l.showTbl = !l.showTbl
-		l.refresh()
-	case "up", "k":
-		if l.sel > 0 {
-			l.sel--
-			l.refresh()
+		if l.showTbl && l.res != nil {
+			l.summary = newSummaryTable(l.res, l.paneW(), l.vp.Height()-4)
 		}
-	case "down", "j":
-		if l.sel < len(l.sc.Variants)-1 {
+		l.refresh()
+	case "up", "k", "down", "j":
+		// В сводке стрелки водят по строкам таблицы, в обычном виде —
+		// по списку вариантов слева.
+		if l.showTbl && l.res != nil {
+			var cmd tea.Cmd
+			l.summary, cmd = l.summary.Update(msg)
+			l.refresh()
+			return l, cmd
+		}
+		if msg.String() == "up" || msg.String() == "k" {
+			if l.sel > 0 {
+				l.sel--
+			}
+		} else if l.sel < len(l.sc.Variants)-1 {
 			l.sel++
+		}
+		l.refresh()
+	case "enter":
+		// Enter в сводке открывает ответы того варианта, на котором стоишь.
+		if l.showTbl && l.res != nil {
+			l.sel = l.summary.Cursor()
+			l.showTbl = false
 			l.refresh()
 		}
 	case "pgup", "pgdown":
@@ -357,7 +377,7 @@ func (l *Lab) frame(focused bool) lipgloss.Style {
 
 func (l *Lab) pane() string {
 	if l.showTbl && l.res != nil {
-		return l.tableView()
+		return l.summaryView()
 	}
 	if l.sel >= len(l.sc.Variants) {
 		return ""
@@ -422,10 +442,14 @@ func (l *Lab) pane() string {
 	return b.String()
 }
 
-func (l *Lab) tableView() string {
+func (l *Lab) summaryView() string {
+	// Цвета в стилях таблицы фиксируются при присваивании, а тема терминала
+	// приходит сообщением позже — поэтому красим при каждой отрисовке.
+	applySummaryStyles(&l.summary)
+
 	var b strings.Builder
 	b.WriteString(stTitle.Render("Сводка") + "\n\n")
-	b.WriteString(report.Table(l.res) + "\n")
+	b.WriteString(l.summary.View() + "\n\n")
 	var total float64
 	for _, a := range l.res.Attempts {
 		total += a.CostUSD
@@ -437,7 +461,7 @@ func (l *Lab) tableView() string {
 	if l.res.RunID != "" {
 		b.WriteString(stDim.Render("журнал: runs/"+l.res.RunID+".jsonl") + "\n")
 	}
-	b.WriteString("\n" + stDim.Render("t — вернуться к ответам") + "\n")
+	b.WriteString("\n" + stDim.Render("↑↓ — строка · Enter — открыть вариант · t — к ответам") + "\n")
 	return b.String()
 }
 

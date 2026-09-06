@@ -24,13 +24,39 @@ type message struct {
 }
 
 type chatReq struct {
-	Model       string    `json:"model"`
-	Messages    []message `json:"messages"`
-	Temperature *float64  `json:"temperature"`
-	MaxTokens   *int      `json:"max_tokens"`
-	Stop        []string  `json:"stop"`
-	Stream      bool      `json:"stream"`
+	Model          string    `json:"model"`
+	Messages       []message `json:"messages"`
+	Temperature    *float64  `json:"temperature"`
+	MaxTokens      *int      `json:"max_tokens"`
+	Stop           []string  `json:"stop"`
+	Stream         bool      `json:"stream"`
+	ResponseFormat *struct {
+		Type string `json:"type"`
+	} `json:"response_format"`
 }
+
+// sampleJSON — ответ в том формате, которого ждут сценарии разбора выписки.
+// Заглушка отдаёт его, когда в запросе стоит response_format json_object
+// или когда слово JSON встречается в промпте. Операций столько же, сколько
+// в реальной выписке: иначе вариант с маленьким max_tokens на репетиции
+// не упирался бы в лимит и картина расходилась бы с боевым прогоном.
+const sampleJSON = `{"transactions": [` +
+	`{"merchant": "Ozon", "amount": 1990, "category": "покупки"}, ` +
+	`{"merchant": "Пятёрочка", "amount": 2340, "category": "продукты"}, ` +
+	`{"merchant": "Дринкит", "amount": 390, "category": "кафе"}, ` +
+	`{"merchant": "Яндекс Такси", "amount": 620, "category": "транспорт"}, ` +
+	`{"merchant": "Wildberries", "amount": 4150, "category": "покупки"}, ` +
+	`{"merchant": "Возврат Wildberries", "amount": -1800, "category": "покупки"}, ` +
+	`{"merchant": "Перевод на копилку", "amount": 10000, "category": "перевод"}, ` +
+	`{"merchant": "Самокат", "amount": 1205, "category": "продукты"}, ` +
+	`{"merchant": "Яндекс Еда", "amount": 1480, "category": "кафе"}, ` +
+	`{"merchant": "Аптека Горздрав", "amount": 870, "category": "здоровье"}, ` +
+	`{"merchant": "Спортзал", "amount": 3500, "category": "здоровье"}, ` +
+	`{"merchant": "РЖД", "amount": 2960, "category": "транспорт"}, ` +
+	`{"merchant": "Возврат Яндекс Еда", "amount": -480, "category": "кафе"}, ` +
+	`{"merchant": "Снятие наличных", "amount": 5000, "category": "наличные"}, ` +
+	`{"merchant": "Spotify", "amount": 900, "category": "подписки"}` +
+	`]}`
 
 var lorem = strings.Fields(`запрос уходит по HTTP на эндпоинт chat completions где токенизатор
 режет текст на токены модель считает распределение вероятностей следующего токена
@@ -68,16 +94,41 @@ func main() {
 			return
 		}
 
-		n := *words
+		// Если у запроса просят JSON — отдаём JSON. Иначе на заглушке
+		// проверки формата всегда красные, и репетиция ничего не проверяет:
+		// непонятно, сломан сценарий или просто заглушка отвечает прозой.
+		wantJSON := req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object"
+		if !wantJSON {
+			for _, m := range req.Messages {
+				if strings.Contains(strings.ToLower(m.Content), "json") {
+					wantJSON = true
+					break
+				}
+			}
+		}
+
+		var source []string
+		var sep string
+		if wantJSON {
+			source, sep = chunkJSON(sampleJSON), ""
+		} else {
+			source, sep = lorem, " "
+		}
+
+		// сколько кусочков просили
+		n := len(source)
+		if !wantJSON && *words < n {
+			n = *words
+		}
 		if req.MaxTokens != nil && *req.MaxTokens < n {
 			n = *req.MaxTokens
 		}
 		out := make([]string, 0, n)
 		for i := 0; i < n; i++ {
-			out = append(out, lorem[i%len(lorem)])
+			out = append(out, source[i%len(source)])
 		}
 		finish := "stop"
-		if req.MaxTokens != nil && *words > *req.MaxTokens {
+		if req.MaxTokens != nil && len(source) > *req.MaxTokens {
 			finish = "length"
 		}
 		promptTokens := 0
@@ -90,7 +141,7 @@ func main() {
 				"id": "mock", "model": req.Model,
 				"choices": []map[string]any{{
 					"index": 0, "finish_reason": finish,
-					"message": map[string]string{"role": "assistant", "content": strings.Join(out, " ")},
+					"message": map[string]string{"role": "assistant", "content": strings.Join(out, sep)},
 				}},
 				"usage": map[string]any{
 					"prompt_tokens": promptTokens, "completion_tokens": len(out),
@@ -117,7 +168,7 @@ func main() {
 		for i, word := range out {
 			piece := word
 			if i > 0 {
-				piece = " " + word
+				piece = sep + word
 			}
 			send(map[string]any{"model": req.Model, "choices": []map[string]any{
 				{"index": 0, "delta": map[string]string{"content": piece}},
@@ -136,6 +187,26 @@ func main() {
 
 	log.Printf("mockllm слушает %s (base_url http://127.0.0.1%s/v1)", *addr, *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
+}
+
+// chunkJSON режет строку на кусочки по нескольку символов.
+//
+// Заглушка считает «токенами» то, что сама же и нарезала. Если резать JSON
+// по пробелам, кусочков выходит втрое меньше, чем даёт настоящий токенизатор
+// на кириллице и пунктуации, — и вариант с маленьким max_tokens на репетиции
+// не упирается в лимит, хотя на живом API упирается.
+func chunkJSON(s string) []string {
+	const size = 3
+	r := []rune(s)
+	out := make([]string, 0, len(r)/size+1)
+	for i := 0; i < len(r); i += size {
+		end := i + size
+		if end > len(r) {
+			end = len(r)
+		}
+		out = append(out, string(r[i:end]))
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
