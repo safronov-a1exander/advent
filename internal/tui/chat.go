@@ -50,6 +50,20 @@ type doneMsg struct {
 	err  error
 }
 
+// stepStartMsg — заголовок финального шага цепочки: он приходит потоком,
+// поэтому подписать его надо до первого чанка.
+type stepStartMsg string
+
+// stepMsg — результат промежуточного шага цепочки (стратегии дня 3).
+// Финальный шаг приходит обычным потоком и doneMsg.
+type stepMsg struct {
+	label   string
+	content string
+	usage   llm.Usage
+	cost    float64
+	latency time.Duration
+}
+
 // NoteMsg — строка для блокнота под окном диалога. Демо-сценарий шлёт её
 // командой `note`, и текст набирается посимвольно. В саму переписку
 // комментарии не попадают: там остаётся только разговор с моделью.
@@ -158,6 +172,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noteTickMsg:
 		return m, m.notes.Tick()
+
+	case stepStartMsg:
+		m.pushLine(stBot.Render("▸ " + string(msg)))
+		m.refresh()
+		return m, m.waitChunk()
+
+	case stepMsg:
+		m.pushLine(stBot.Render("▸ " + msg.label))
+		m.pushLine(stDim.Render(shorten(msg.content, 600)))
+		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ %s · in %d / out %d · $%.6f",
+			msg.latency.Round(time.Millisecond),
+			msg.usage.PromptTokens, msg.usage.CompletionTokens, msg.cost)))
+		m.pushLine("")
+		m.tot.calls++
+		m.tot.prompt += msg.usage.PromptTokens
+		m.tot.completion += msg.usage.CompletionTokens
+		m.tot.reasoning += msg.usage.ReasoningTokens
+		m.tot.cost += msg.cost
+		m.refresh()
+		return m, m.waitChunk()
 
 	case chunkMsg:
 		if msg.Content != "" {
@@ -307,7 +341,15 @@ func (m *Model) buildRequest(userText string) llm.Request {
 }
 
 func (m *Model) send(text string) tea.Cmd {
-	req := m.buildRequest(text)
+	// Всё, что читает горутина, снимаем здесь: панель живёт в главном
+	// цикле и может поменять настройки, пока запрос в полёте.
+	tmpl := m.buildRequest("")
+	tmpl.Messages = nil
+	sys := strings.TrimSpace(m.set.System)
+	hist := append([]llm.Message(nil), m.history...)
+	chain := m.set.Chain(text)
+	streaming := m.set.Stream
+
 	m.history = append(m.history, llm.Message{Role: llm.RoleUser, Content: text})
 
 	m.pushLine("")
@@ -318,38 +360,84 @@ func (m *Model) send(text string) tea.Cmd {
 	if sum := m.set.Summary(); sum != "" {
 		head += " " + stDim.Render(sum)
 	}
+	if len(chain) > 1 {
+		head += " " + stDim.Render(fmt.Sprintf("· %d вызова(ов)", len(chain)))
+	}
 	m.pushLine(head)
 	m.partial.Reset()
 	m.busy.Store(true)
 	m.lastErr = nil
 	m.panel.Changed = false
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	m.cancel = cancel
 	ch := make(chan tea.Msg, 256)
 	m.stream = ch
-	streaming := m.set.Stream
+	client := m.opts.Client
 
 	go func() {
 		defer cancel()
-		var (
-			resp *llm.Response
-			err  error
-		)
-		if streaming {
-			resp, err = m.opts.Client.ChatStream(ctx, req, func(c llm.Chunk) error {
-				if !c.Done {
-					ch <- chunkMsg(c)
-				}
-				return nil
-			})
-		} else {
-			resp, err = m.opts.Client.Chat(ctx, req)
-			if err == nil {
-				ch <- chunkMsg(llm.Chunk{Content: resp.Content})
+		prev := map[string]string{}
+
+		for _, st := range chain {
+			req := tmpl
+			prompt := st.Build(text, prev)
+
+			stepSys := sys
+			if st.System != "" {
+				stepSys = st.System
 			}
+			var msgs []llm.Message
+			if stepSys != "" {
+				msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: stepSys})
+			}
+			// История диалога подмешивается только в финальный шаг:
+			// промежуточные — самостоятельные вызовы.
+			if st.Final {
+				msgs = append(msgs, hist...)
+			}
+			msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: prompt})
+			req.Messages = msgs
+
+			if !st.Final {
+				resp, err := client.Chat(ctx, req)
+				if err != nil {
+					ch <- doneMsg{err: err}
+					return
+				}
+				if st.Capture != "" {
+					prev[st.Capture] = resp.Content
+				}
+				ch <- stepMsg{
+					label: st.Label, content: resp.Content,
+					usage: resp.Usage, cost: resp.CostUSD, latency: resp.Latency,
+				}
+				continue
+			}
+
+			if len(chain) > 1 {
+				ch <- stepStartMsg(st.Label)
+			}
+			var (
+				resp *llm.Response
+				err  error
+			)
+			if streaming {
+				resp, err = client.ChatStream(ctx, req, func(c llm.Chunk) error {
+					if !c.Done {
+						ch <- chunkMsg(c)
+					}
+					return nil
+				})
+			} else {
+				resp, err = client.Chat(ctx, req)
+				if err == nil {
+					ch <- chunkMsg(llm.Chunk{Content: resp.Content})
+				}
+			}
+			ch <- doneMsg{resp: resp, err: err}
+			return
 		}
-		ch <- doneMsg{resp: resp, err: err}
 	}()
 
 	m.refresh()

@@ -25,7 +25,8 @@ type Row struct {
 	ReasTok  int
 	Cost     float64
 	Finish   string
-	Checks   string
+	Passed   int    // прогонов, где все проверки прошли
+	Checks   string // «прошло/всего»
 	OK       bool
 }
 
@@ -57,6 +58,8 @@ func Rows(res *runner.Result) []Row {
 		g.row.Finish = a.Finish
 		if a.Err != nil || !a.ChecksOK() {
 			g.fails++
+		} else {
+			g.row.Passed++
 		}
 	}
 
@@ -67,11 +70,9 @@ func Rows(res *runner.Result) []Row {
 			g.row.AvgMS = g.msSum / int64(g.row.Attempts)
 		}
 		g.row.OK = g.fails == 0
-		if g.fails == 0 {
-			g.row.Checks = "ok"
-		} else {
-			g.row.Checks = fmt.Sprintf("%d/%d провал", g.fails, g.row.Attempts)
-		}
+		// доля успешных прогонов: при repeat > 1 это и есть «стабильность
+		// способа», главная метрика дня 3
+		g.row.Checks = fmt.Sprintf("%d/%d", g.row.Passed, g.row.Attempts)
 		out = append(out, g.row)
 	}
 	return out
@@ -80,7 +81,7 @@ func Rows(res *runner.Result) []Row {
 // Table рисует сводку моноширинной таблицей — читается прямо в видео.
 func Table(res *runner.Result) string {
 	rows := Rows(res)
-	head := []string{"ВАРИАНТ", "МОДЕЛЬ", "ПАРАМЕТРЫ", "СРЕД.МС", "IN", "OUT", "REAS", "$", "FINISH", "ПРОВЕРКИ"}
+	head := []string{"ВАРИАНТ", "МОДЕЛЬ", "ПАРАМЕТРЫ", "СРЕД.МС", "IN", "OUT", "REAS", "$", "FINISH", "УСПЕХ"}
 	data := [][]string{}
 	for _, r := range rows {
 		data = append(data, []string{

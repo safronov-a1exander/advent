@@ -29,6 +29,10 @@ type Settings struct {
 	Stop           []string
 	ResponseFormat string
 
+	// День 3 — способ рассуждения. Только для чата: в сценариях цепочки
+	// описаны явно через steps.
+	Strategy string
+
 	// Повторов на вариант; только для lab, 0 = как в сценарии.
 	Repeat int
 }
@@ -78,6 +82,17 @@ func (s *Settings) modelField() Field {
 	return f
 }
 
+// strategyField — способ рассуждения, добавленный на шаге 3.
+// Подсказка меняется вместе со значением, поэтому HintFn, а не Hint.
+func (s *Settings) strategyField() Field {
+	f := EnumField("стратегия", "", Strategies,
+		func() string { return s.Strategy },
+		func(v string) { s.Strategy = v })
+	f.Value = func() string { return strategyLabel(s.Strategy) }
+	f.HintFn = func() string { return StrategyHint(s.Strategy) }
+	return f
+}
+
 // Fields — набор параметров для панели.
 // День 1: из чего состоит запрос. День 2: чем контролируется формат ответа.
 func (s *Settings) Fields() []Field {
@@ -93,10 +108,12 @@ func (s *Settings) Fields() []Field {
 			func(v string) { s.System = v }),
 	}
 	if !s.Overlay {
-		f = append(f, BoolField("стриминг",
-			"stream=true — ответ приходит по мере генерации (SSE)",
-			func() bool { return s.Stream },
-			func(v bool) { s.Stream = v }))
+		f = append(f,
+			s.strategyField(),
+			BoolField("стриминг",
+				"stream=true — ответ приходит по мере генерации (SSE)",
+				func() bool { return s.Stream },
+				func(v bool) { s.Stream = v }))
 	}
 
 	f = append(f,
@@ -167,6 +184,9 @@ func (s *Settings) Apply(req *llm.Request) {
 // Имя модели сюда не входит: оно и так печатается рядом.
 func (s *Settings) Summary() string {
 	var parts []string
+	if s.Strategy != "" {
+		parts = append(parts, s.Strategy)
+	}
 	if s.MaxTokens != nil {
 		parts = append(parts, fmt.Sprintf("max=%d", *s.MaxTokens))
 	}
