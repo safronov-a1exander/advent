@@ -12,34 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/store"
-)
-
-// ---- стили ----
-
-var (
-	cBorder = lipgloss.AdaptiveColor{Light: "#c8ccd4", Dark: "#3b4048"}
-	cAccent = lipgloss.AdaptiveColor{Light: "#0b6bcb", Dark: "#7aa2f7"}
-	cUser   = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#9ece6a"}
-	cDim    = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#7f8694"}
-	cErr    = lipgloss.AdaptiveColor{Light: "#b42318", Dark: "#f7768e"}
-
-	stTitle  = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
-	stUser   = lipgloss.NewStyle().Bold(true).Foreground(cUser)
-	stBot    = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
-	stDim    = lipgloss.NewStyle().Foreground(cDim)
-	stErr    = lipgloss.NewStyle().Foreground(cErr)
-	stFrame  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cBorder)
-	stFocus  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent)
-	stStatus = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
-	stNote   = lipgloss.NewStyle().Foreground(cAccent).Italic(true)
 )
 
 // ---- сообщения ----
@@ -152,12 +132,21 @@ func NewModel(o Options) *Model {
 	return m
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, m.sp.Tick) }
+func (m *Model) Init() tea.Cmd {
+	// Спрашиваем у терминала цвет фона: в lipgloss v2 нет AdaptiveColor,
+	// тему приложение выбирает само (см. theme.go).
+	return tea.Batch(tea.RequestBackgroundColor, m.sp.Tick)
+}
 
 // Busy сообщает демо-драйверу, ждать ли ответ.
 func (m *Model) Busy() bool { return m.busy.Load() }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if themeFromMsg(msg) {
+		m.refresh()
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -165,7 +154,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
 	case NoteMsg:
@@ -248,7 +237,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Ctrl+C работает всегда, даже посреди редактирования поля.
 	if msg.String() == "ctrl+c" {
 		if m.cancel != nil {
@@ -599,9 +588,10 @@ func (m *Model) layout() {
 		bodyW = 20
 	}
 	if !m.ready {
-		m.vp = viewport.New(bodyW, vpH)
+		m.vp = viewport.New(viewport.WithWidth(bodyW), viewport.WithHeight(vpH))
 	} else {
-		m.vp.Width, m.vp.Height = bodyW, vpH
+		m.vp.SetWidth(bodyW)
+		m.vp.SetHeight(vpH)
 	}
 	m.ta.SetWidth(m.w - 4)
 	m.notes.SetSize(m.w-4, notesHeight)
@@ -613,7 +603,7 @@ func (m *Model) refresh() {
 	if p := m.partial.String(); p != "" {
 		body += "\n" + p
 	}
-	w := m.vp.Width - 2
+	w := m.vp.Width() - 2
 	if w < 20 {
 		w = 20
 	}
@@ -621,9 +611,11 @@ func (m *Model) refresh() {
 	m.vp.GotoBottom()
 }
 
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
 	if !m.ready {
-		return "инициализация…"
+		v := tea.NewView("инициализация…")
+		v.AltScreen = true
+		return v
 	}
 	title := m.opts.Title
 	if title == "" {
@@ -632,7 +624,7 @@ func (m *Model) View() string {
 	header := stTitle.Render(title) + "  " +
 		stDim.Render(fmt.Sprintf("%s / %s", m.opts.Provider, m.set.Model))
 
-	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width + 2).Render(m.vp.View())
+	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width() + 2).Render(m.vp.View())
 	body := transcript
 	if pw := m.panelW(); pw > 0 {
 		// Рамка панели по высоте содержимого, а не во весь экран: параметров
@@ -650,7 +642,10 @@ func (m *Model) View() string {
 	rows = append(rows,
 		m.frame(m.focus == focusInput).Width(m.w-2).Render(m.ta.View()),
 		stStatus.Render(m.status()))
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	// В v2 альт-экран — свойство вида, а не опция программы.
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	v.AltScreen = true
+	return v
 }
 
 func (m *Model) frame(focused bool) lipgloss.Style {

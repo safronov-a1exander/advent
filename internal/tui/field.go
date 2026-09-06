@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Field — одна строка панели параметров.
@@ -253,7 +253,7 @@ func NewPanel(fields []Field, width int) *Panel {
 }
 
 func (p *Panel) SetFields(f []Field) { p.fields = f }
-func (p *Panel) SetWidth(w int)      { p.width = w; p.input.Width = w - 6 }
+func (p *Panel) SetWidth(w int)      { p.width = w; p.input.SetWidth(w - 6) }
 func (p *Panel) Editing() bool       { return p.editing }
 func (p *Panel) Selected() string {
 	if p.sel < len(p.fields) {
@@ -264,7 +264,7 @@ func (p *Panel) Selected() string {
 
 // Update обрабатывает клавиши, когда фокус на панели.
 // Возвращает true, если клавиша обработана.
-func (p *Panel) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
+func (p *Panel) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if len(p.fields) == 0 {
 		return nil, false
 	}
@@ -288,10 +288,14 @@ func (p *Panel) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
 			p.err = ""
 			return nil, true
 		}
-		if p.fresh && msg.Type == tea.KeyRunes {
-			p.input.SetValue("")
+		// Печатный символ поверх подставленного значения затирает его
+		// целиком, как выделенный текст в обычной форме.
+		if msg.Text != "" {
+			if p.fresh {
+				p.input.SetValue("")
+			}
 			p.fresh = false
-		} else if msg.Type != tea.KeyRunes {
+		} else {
 			p.fresh = false
 		}
 		var cmd tea.Cmd

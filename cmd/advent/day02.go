@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/report"
@@ -188,7 +188,7 @@ func cmdLab(ctx context.Context, args []string) error {
 	}
 
 	l := tui.NewLab(sc, rn, set, reportDir)
-	p := tea.NewProgram(l, tea.WithAltScreen(), tea.WithContext(ctx))
+	p := tea.NewProgram(l, tea.WithContext(ctx))
 
 	if *script != "" {
 		acts, err := tui.ParseDemo(*script)

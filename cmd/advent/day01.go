@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/llm"
@@ -195,7 +195,7 @@ func runTUI(ctx context.Context, a *askFlags, acts []tui.Action, title string) e
 		Store:    w,
 		Title:    title,
 	})
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithContext(ctx))
 
 	if len(acts) > 0 {
 		go tui.RunDemo(p, m, acts)

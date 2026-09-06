@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/report"
 	"github.com/safronov-a1exander/advent/internal/runner"
@@ -71,18 +71,26 @@ func NewLab(sc *scenario.Scenario, r *runner.Runner, set *Settings, reportDir st
 	return l
 }
 
-func (l *Lab) Init() tea.Cmd { return l.sp.Tick }
+func (l *Lab) Init() tea.Cmd {
+	// см. chat.go: тему терминала запрашиваем сами
+	return tea.Batch(tea.RequestBackgroundColor, l.sp.Tick)
+}
 
 func (l *Lab) Busy() bool { return l.busy.Load() }
 
 func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if themeFromMsg(msg) {
+		l.refresh()
+		return l, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		l.w, l.h = msg.Width, msg.Height
 		l.resize()
 		l.ready = true
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return l.onKey(msg)
 
 	case NoteMsg:
@@ -132,7 +140,7 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return l, nil
 }
 
-func (l *Lab) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (l *Lab) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return l, tea.Quit
 	}
@@ -268,10 +276,11 @@ func (l *Lab) resize() {
 	if vpH < 4 {
 		vpH = 4
 	}
-	if l.vp.Width == 0 && l.vp.Height == 0 {
-		l.vp = viewport.New(l.paneW(), vpH)
+	if l.vp.Width() == 0 && l.vp.Height() == 0 {
+		l.vp = viewport.New(viewport.WithWidth(l.paneW()), viewport.WithHeight(vpH))
 	} else {
-		l.vp.Width, l.vp.Height = l.paneW(), vpH
+		l.vp.SetWidth(l.paneW())
+		l.vp.SetHeight(vpH)
 	}
 	if pw := l.panelW(); pw > 0 {
 		l.panel.SetWidth(pw - 2)
@@ -312,7 +321,7 @@ func (l *Lab) paneW() int {
 }
 
 func (l *Lab) refresh() {
-	if l.vp.Width == 0 {
+	if l.vp.Width() == 0 {
 		return
 	}
 	l.vp.SetContent(l.pane())
@@ -449,9 +458,11 @@ func (l *Lab) listView() string {
 	return b.String()
 }
 
-func (l *Lab) View() string {
+func (l *Lab) View() tea.View {
 	if !l.ready {
-		return "инициализация…"
+		v := tea.NewView("инициализация…")
+		v.AltScreen = true
+		return v
 	}
 	repeat := l.sc.Repeat
 	if l.set.Repeat > 0 {
@@ -467,12 +478,12 @@ func (l *Lab) View() string {
 		len(l.sc.Variants), repeat, l.set.OverrideSummary()), l.w-1))
 
 	cols := []string{
-		stFrame.Width(l.listW()).Height(l.vp.Height).Render(l.listView()),
+		stFrame.Width(l.listW()).Height(l.vp.Height()).Render(l.listView()),
 		l.frame(l.focus == focusInput).Width(l.paneW() + 2).Render(l.vp.View()),
 	}
 	if pw := l.panelW(); pw > 0 {
 		cols = append(cols, l.frame(l.focus == focusPanel).
-			Width(pw).Height(l.vp.Height).Render(l.panel.View(l.focus == focusPanel)))
+			Width(pw).Height(l.vp.Height()).Render(l.panel.View(l.focus == focusPanel)))
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 
@@ -497,7 +508,10 @@ func (l *Lab) View() string {
 	}
 
 	rows = append(rows, stStatus.Render(status))
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	// В v2 альт-экран — свойство вида, а не опция программы.
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	v.AltScreen = true
+	return v
 }
 
 // modelLabel — какая модель реально пойдёт в запрос: переопределение из
