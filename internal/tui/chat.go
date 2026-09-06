@@ -8,10 +8,12 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -91,6 +93,11 @@ type Model struct {
 	vp        viewport.Model
 	ta        textarea.Model
 	sp        spinner.Model
+	help      help.Model
+	keys      chatKeys
+	panelKeys panelKeys
+	editKeys  editKeys
+	notesKeys notesKeys
 	ready     bool
 	w, h      int
 	focus     focusTarget
@@ -126,7 +133,14 @@ func NewModel(o Options) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(cAccent)
 
-	m := &Model{opts: o, set: o.Settings, ta: ta, sp: sp, showPanel: true}
+	m := &Model{
+		opts: o, set: o.Settings, ta: ta, sp: sp, showPanel: true,
+		help:      newHelp(),
+		keys:      newChatKeys(len(o.Settings.Catalog) > 1),
+		panelKeys: newPanelKeys("в диалог"),
+		editKeys:  newEditKeys(),
+		notesKeys: newNotesKeys("вернуться в диалог"),
+	}
 	m.panel = NewPanel(m.set.Fields(), 34)
 	m.notes = NewNotes(60, notesHeight)
 	return m
@@ -636,7 +650,7 @@ func (m *Model) View() tea.View {
 
 	rows := []string{header, "", body}
 	if m.notesVisible() {
-		rows = append(rows, titledFrame(m.frame(m.focus == focusNotes), m.w-2,
+		rows = append(rows, titledFrame(m.frame(m.focus == focusNotes), m.borderColor(m.focus == focusNotes), m.w-2,
 			"блокнот", m.notes.View(m.focus == focusNotes)))
 	}
 	rows = append(rows,
@@ -648,6 +662,15 @@ func (m *Model) View() tea.View {
 	return v
 }
 
+// borderColor — цвет рамки под текущий фокус; нужен titledFrame,
+// который рисует верхнюю границу сам.
+func (m *Model) borderColor(focused bool) color.Color {
+	if focused {
+		return cAccent
+	}
+	return cBorder
+}
+
 func (m *Model) frame(focused bool) lipgloss.Style {
 	if focused {
 		return stFocus
@@ -656,16 +679,22 @@ func (m *Model) frame(focused bool) lipgloss.Style {
 }
 
 func (m *Model) status() string {
-	left := "Enter отправить · Tab параметры и блокнот · Ctrl+E все модели · Ctrl+R сброс · Ctrl+C выход"
+	// Подсказка собирается из тех же привязок, по которым работают клавиши,
+	// поэтому не может разойтись с поведением (см. keys.go).
+	var left string
 	switch {
 	case m.busy.Load():
 		left = m.sp.View() + " ждём ответ…"
 	case m.panel.Editing():
-		left = "ввод значения: Enter применить · Esc отмена"
+		left = shortHelp(m.help, m.editKeys.Apply, m.editKeys.Cancel)
 	case m.focus == focusPanel:
-		left = "параметры: ↑↓ поле · ←→ значение · Enter ввести · Tab дальше · Esc в диалог"
+		left = shortHelp(m.help, m.panelKeys.Field, m.panelKeys.Value,
+			m.panelKeys.Edit, m.panelKeys.Cycle, m.panelKeys.Back)
 	case m.focus == focusNotes:
-		left = "блокнот: печатай текст · Enter — новая строка · Esc вернуться в диалог"
+		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
+	default:
+		left = shortHelp(m.help, m.keys.Send, m.keys.Cycle, m.keys.Bench,
+			m.keys.Reset, m.keys.Clear, m.keys.Quit)
 	}
 	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
 		m.tot.calls, m.tot.prompt, m.tot.completion, m.tot.cost)

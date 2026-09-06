@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -33,7 +35,13 @@ type Lab struct {
 
 	vp   viewport.Model
 	sp   spinner.Model
-	w, h int
+	help help.Model
+
+	keys      labKeys
+	panelKeys panelKeys
+	editKeys  editKeys
+	notesKeys notesKeys
+	w, h      int
 
 	focus     focusTarget
 	showPanel bool
@@ -65,6 +73,11 @@ func NewLab(sc *scenario.Scenario, r *runner.Runner, set *Settings, reportDir st
 	l := &Lab{
 		sc: sc, run: r, sp: sp, report: reportDir,
 		byID: map[string][]int{}, set: set, showPanel: true,
+		help:      newHelp(),
+		keys:      newLabKeys(),
+		panelKeys: newPanelKeys("к результатам"),
+		editKeys:  newEditKeys(),
+		notesKeys: newNotesKeys("к результатам"),
 	}
 	l.panel = NewPanel(set.Fields(), 34)
 	l.notes = NewNotes(60, notesHeight)
@@ -327,6 +340,14 @@ func (l *Lab) refresh() {
 	l.vp.SetContent(l.pane())
 }
 
+// borderColor — см. chat.go.
+func (l *Lab) borderColor(focused bool) color.Color {
+	if focused {
+		return cAccent
+	}
+	return cBorder
+}
+
 func (l *Lab) frame(focused bool) lipgloss.Style {
 	if focused {
 		return stFocus
@@ -489,22 +510,27 @@ func (l *Lab) View() tea.View {
 
 	rows := []string{head, sub, "", body}
 	if l.notesVisible() {
-		rows = append(rows, titledFrame(l.frame(l.focus == focusNotes), l.w-2,
+		rows = append(rows, titledFrame(l.frame(l.focus == focusNotes), l.borderColor(l.focus == focusNotes), l.w-2,
 			"блокнот", l.notes.View(l.focus == focusNotes)))
 	}
 
-	status := "r — прогнать · ↑↓ — вариант · t — сводка · Tab — параметры и блокнот · q — выход"
+	// Подсказка собирается из тех же привязок, по которым работают клавиши.
+	var status string
 	switch {
 	case l.busy.Load():
 		status = l.sp.View() + " прогон… " + l.cur
 	case l.panel.Editing():
-		status = "ввод значения: Enter применить · Esc отмена"
+		status = shortHelp(l.help, l.editKeys.Apply, l.editKeys.Cancel)
 	case l.focus == focusPanel:
-		status = "параметры: ↑↓ поле · ←→ значение · Enter ввести · Tab дальше · Esc к результатам"
+		status = shortHelp(l.help, l.panelKeys.Field, l.panelKeys.Value,
+			l.panelKeys.Edit, l.panelKeys.Cycle, l.panelKeys.Back)
 	case l.focus == focusNotes:
-		status = "блокнот: печатай текст · Enter — новая строка · Esc к результатам"
+		status = shortHelp(l.help, l.notesKeys.Line, l.notesKeys.Back)
 	case l.dirty:
 		status = "параметры изменены — нажми r, чтобы прогнать заново"
+	default:
+		status = shortHelp(l.help, l.keys.Run, l.keys.Variant, l.keys.Summary,
+			l.keys.Cycle, l.keys.Quit)
 	}
 
 	rows = append(rows, stStatus.Render(status))
