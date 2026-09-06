@@ -129,6 +129,9 @@ type Model struct {
 	lastErr error
 	last    *llm.Response
 	tot     totals
+	// lastQuestion — последний заданный вопрос; по Ctrl+E он уходит
+	// на все модели сразу (задание дня 5).
+	lastQuestion string
 }
 
 func NewModel(o Options) *Model {
@@ -172,6 +175,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noteTickMsg:
 		return m, m.notes.Tick()
+
+	case benchStepMsg:
+		row := benchRow(msg)
+		if row.Err != "" {
+			m.pushLine(stErr.Render("  " + row.Model + ": " + row.Err))
+		} else {
+			m.pushLine(stBot.Render("  "+row.Model) + " " +
+				stDim.Render(fmt.Sprintf("%s · in %d / out %d · $%.6f",
+					row.Latency.Round(time.Millisecond),
+					row.Usage.PromptTokens, row.Usage.CompletionTokens, row.Cost)))
+			m.pushLine(stDim.Render("  " + shorten(row.Answer, 300)))
+			m.tot.calls++
+			m.tot.prompt += row.Usage.PromptTokens
+			m.tot.completion += row.Usage.CompletionTokens
+			m.tot.reasoning += row.Usage.ReasoningTokens
+			m.tot.cost += row.Cost
+		}
+		m.refresh()
+		return m, m.waitChunk()
+
+	case benchDoneMsg:
+		m.busy.Store(false)
+		m.pushLine("")
+		for _, line := range benchTable(msg.rows) {
+			m.pushLine(line)
+		}
+		m.pushLine(stDim.Render("сравнение записано в журнал runs/*.jsonl"))
+		m.refresh()
+		return m, nil
 
 	case stepStartMsg:
 		m.pushLine(stBot.Render("▸ " + string(msg)))
@@ -286,6 +318,12 @@ func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+r":
 		m.resetConversation()
 		return m, nil
+
+	case "ctrl+e":
+		if m.busy.Load() {
+			return m, nil
+		}
+		return m, m.startBench()
 	}
 
 	if m.focus != focusInput {
@@ -351,6 +389,7 @@ func (m *Model) send(text string) tea.Cmd {
 	streaming := m.set.Stream
 
 	m.history = append(m.history, llm.Message{Role: llm.RoleUser, Content: text})
+	m.lastQuestion = text
 
 	m.pushLine("")
 	m.pushLine(stUser.Render("вы:"))
@@ -622,7 +661,7 @@ func (m *Model) frame(focused bool) lipgloss.Style {
 }
 
 func (m *Model) status() string {
-	left := "Enter отправить · Tab параметры и блокнот · Ctrl+R сброс · Ctrl+L очистить · Ctrl+C выход"
+	left := "Enter отправить · Tab параметры и блокнот · Ctrl+E все модели · Ctrl+R сброс · Ctrl+C выход"
 	switch {
 	case m.busy.Load():
 		left = m.sp.View() + " ждём ответ…"

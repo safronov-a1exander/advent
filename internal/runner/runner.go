@@ -77,6 +77,9 @@ type Result struct {
 	Attempts []Attempt
 	Started  time.Time
 	Finished time.Time
+	// Models — характеристики моделей из config.yaml, чтобы отчёт мог
+	// показать класс, контекст, прайс и ссылку.
+	Models map[string]llm.ModelInfo
 }
 
 // Progress — колбэк для UI: вызывается до и после каждого варианта.
@@ -95,6 +98,7 @@ type Runner struct {
 	Provider string
 	Store    *store.Writer
 	Fallback string // модель по умолчанию, если её нет в сценарии
+	Models   map[string]llm.ModelInfo
 	// Override — параметры, навязанные поверх сценария из панели интерфейса.
 	// Накладываются последними, поэтому бьют и вариант, и шаг.
 	Override *scenario.Params
@@ -106,7 +110,7 @@ type Runner struct {
 }
 
 func (r *Runner) Run(ctx context.Context, s *scenario.Scenario, onProgress Progress) (*Result, error) {
-	res := &Result{Scenario: s, Provider: r.Provider, Started: time.Now()}
+	res := &Result{Scenario: s, Provider: r.Provider, Started: time.Now(), Models: r.Models}
 	if r.Store != nil {
 		res.RunID = r.Store.RunID()
 	}
