@@ -1,0 +1,81 @@
+# День 2 — контроль формата ответа.
+# Прогон: .\scripts\demo.ps1 -Name day02 -AppArgs @('lab','-scenario','scenarios/day02-format.yaml','-script','scripts/day02.demo')
+#
+# Всё, что делает сценарий, доступно руками: те же клавиши, тот же экран.
+
+sleep 1500ms
+note Разбор банковской выписки: из сырых строк нужна структура, а не проза.
+sleep 7s
+
+note Один запрос — пять уровней контроля формата. Панель справа работает слоем поверх YAML-сценария.
+sleep 6s
+
+note Прогон всех пяти вариантов. Каждый ответ сразу проверяется автоматом.
+sleep 2s
+key r
+wait 300s
+sleep 2s
+
+note Готово. Сводка: параметры, задержка, токены, finish_reason, вердикт проверок.
+sleep 8s
+
+key t
+sleep 1s
+note Вариант 1 — ответ прозой. Считать по нему нельзя: валидного JSON нет, проверки красные.
+sleep 6s
+
+key down
+sleep 1s
+note Вариант 2 — формат описан словами. Обычно попадает, но гарантии нет: обёртка в ```json ломает разбор.
+sleep 8s
+
+key down
+sleep 1s
+note Вариант 3 — max_tokens=150. Пятнадцать операций не влезают: finish_reason становится length, JSON битый.
+sleep 9s
+
+key down
+sleep 1s
+note Вариант 4 — стоп-последовательность. Промпт ставит маркер, параметр stop обрывает генерацию ровно на нём.
+sleep 9s
+
+key down
+sleep 1s
+note Вариант 5 — response_format=json_object. Формат гарантирован параметром API. Вот с этим ассистент и будет считать.
+sleep 9s
+
+note Те же варианты, но параметры задаются руками. Tab — фокус в панель.
+sleep 3s
+key tab
+sleep 2s
+
+note Переход к max_tokens, Enter — ввод значения.
+sleep 3s
+key down
+sleep 800ms
+key down
+sleep 1500ms
+key enter
+sleep 1500ms
+type 40
+sleep 800ms
+key enter
+sleep 2s
+
+note Лимит в 40 токенов навязан ВСЕМ вариантам, включая те, где его в сценарии не было.
+sleep 6s
+
+key esc
+sleep 1s
+key r
+wait 300s
+sleep 2s
+
+key t
+sleep 1s
+note Красным стало всё: на 40 токенах не выживает даже response_format — JSON не успевает закрыться.
+sleep 10s
+
+note Вывод: словами формат просят, параметрами — обеспечивают. Но лимит длины бьёт любую гарантию.
+sleep 10s
+quit
