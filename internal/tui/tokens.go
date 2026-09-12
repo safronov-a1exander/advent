@@ -57,6 +57,9 @@ func (m *Model) tokenLine(reply *agent.Reply) string {
 		if t.Calls > 1 {
 			parts = append(parts, fmt.Sprintf("вызовов %d", t.Calls))
 		}
+		if t.CompressCalls > 0 {
+			parts = append(parts, fmt.Sprintf("+сжатие %d→%d", t.CompressPrompt, t.CompressCompletion))
+		}
 	} else {
 		// ответ, начатый до сброса, в учёт не попал — показываем голый usage
 		parts = append(parts,
@@ -126,15 +129,25 @@ func (m *Model) dumpTokens() {
 		}
 	}
 	const barW = 24
-	head := fmt.Sprintf("  %-3s %7s %8s %8s %7s %8s %8s  %s", "ход", "вопрос~", "sys+ист", "запрос", "ответ", "оценка", "итого", "рост запроса")
+	head := fmt.Sprintf("  %-3s %7s %8s %8s %7s %7s %8s %8s  %s", "ход", "вопрос~", "sys+ист", "запрос", "ответ", "сжатие", "оценка", "итого", "рост запроса")
 	m.pushLine(stDim.Render(head))
-	total := 0
+	total, compressTotal := 0, 0
 	for i, t := range turns {
-		total += t.Prompt + t.Completion
+		compress := t.CompressPrompt + t.CompressCompletion
+		compressTotal += compress
+		// итого — вместе со служебными вызовами сжатия: они тоже расход
+		total += t.Prompt + t.Completion + compress
 		bar := strings.Repeat("█", max(1, t.Prompt*barW/max(maxPrompt, 1)))
-		m.pushLine(fmt.Sprintf("  %-3d %7d %8d %8d %7d %8s %8d  %s",
-			i+1, t.Question, t.History(), t.Prompt, t.Completion,
+		compressCell := "—"
+		if compress > 0 {
+			compressCell = fmt.Sprint(compress)
+		}
+		m.pushLine(fmt.Sprintf("  %-3d %7d %8d %8d %7d %7s %8s %8d  %s",
+			i+1, t.Question, t.History(), t.Prompt, t.Completion, compressCell,
 			estError(t.Estimated, t.Prompt), total, stNote.Render(bar)))
+	}
+	if compressTotal > 0 {
+		m.pushLine(stDim.Render(fmt.Sprintf("  из них на сжатие истории — %d токенов служебных вызовов", compressTotal)))
 	}
 
 	first, last := turns[0], turns[len(turns)-1]
@@ -160,4 +173,13 @@ func estError(est, actual int) string {
 		return "—"
 	}
 	return fmt.Sprintf("%+d%%", (est-actual)*100/actual)
+}
+
+// shorten2 — первые n строк многострочного текста, остальное — счётчиком.
+func shorten2(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[:n], "\n") + fmt.Sprintf("\n… ещё строк: %d", len(lines)-n)
 }

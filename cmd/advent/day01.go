@@ -41,6 +41,10 @@ type askFlags struct {
 	contextLimit int
 	// thinking — стартовый режим рассуждений: "", enabled или disabled.
 	thinking string
+	// contextStrategy, keepLast, summarizeEvery — стратегия контекста (день 9).
+	contextStrategy string
+	keepLast        int
+	summarizeEvery  int
 
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
@@ -57,6 +61,9 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.runID, "run", "", "имя файла журнала в runs/ (по умолчанию с меткой времени)")
 	fs.IntVar(&a.contextLimit, "context-limit", 0, "лимит контекста агента в токенах для chat/demo (0 — только окно модели)")
 	fs.StringVar(&a.thinking, "thinking", "", "режим рассуждений для chat/demo: enabled | disabled (пусто — как у модели)")
+	fs.StringVar(&a.contextStrategy, "context", "", "стратегия контекста для chat/demo: пусто — вся история, summary — сводка + хвост")
+	fs.IntVar(&a.keepLast, "keep-last", 0, "для summary: сколько последних сообщений идёт как есть (0 — по умолчанию)")
+	fs.IntVar(&a.summarizeEvery, "summarize-every", 0, "для summary: сжимать, когда за хвостом накопилось столько сообщений (0 — по умолчанию)")
 	return a
 }
 
@@ -209,6 +216,18 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		set.Thinking = a.thinking
 	default:
 		return fmt.Errorf("-thinking: ожидали enabled или disabled, получили %q", a.thinking)
+	}
+	switch a.contextStrategy {
+	case agent.ContextFull, agent.ContextSummary:
+		set.Context = a.contextStrategy
+	default:
+		return fmt.Errorf("-context: ожидали пусто или summary, получили %q", a.contextStrategy)
+	}
+	if a.keepLast > 0 {
+		set.KeepLast = llm.I(a.keepLast)
+	}
+	if a.summarizeEvery > 0 {
+		set.SummarizeEvery = llm.I(a.summarizeEvery)
 	}
 
 	// Экран не ходит в API сам: он говорит с агентами из пула, а пул

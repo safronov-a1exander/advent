@@ -25,6 +25,8 @@ type fakeLLM struct {
 	peak     atomic.Int32
 	// usage — как «провайдер» считает токены; nil — 10 на сообщение
 	usage func([]llm.Message) llm.Usage
+	// failSummary — отказывать только на запросах сжатия истории
+	failSummary bool
 }
 
 func (f *fakeLLM) Name() string                                 { return "fake" }
@@ -45,6 +47,9 @@ func (f *fakeLLM) Chat(ctx context.Context, req llm.Request) (*llm.Response, err
 	f.mu.Lock()
 	f.requests = append(f.requests, req)
 	fail := f.fail
+	if f.failSummary && strings.HasPrefix(req.Messages[0].Content, "Ты сжимаешь переписку") {
+		fail = errors.New("HTTP 503 на сжатии")
+	}
 	f.mu.Unlock()
 	if fail != nil {
 		return nil, fail
@@ -81,13 +86,29 @@ func (f *fakeLLM) last() llm.Request {
 }
 
 func answer(msgs []llm.Message) string {
+	// Запрос на сжатие: «сводка» — все реплики пользователя и прежняя сводка
+	// без изменений. Честнее любой настоящей модели, зато проверяемо.
+	if msgs[0].Role == llm.RoleSystem && strings.HasPrefix(msgs[0].Content, "Ты сжимаешь переписку") {
+		var facts []string
+		for _, line := range strings.Split(msgs[len(msgs)-1].Content, "\n") {
+			if rest, ok := strings.CutPrefix(line, "Пользователь: "); ok {
+				facts = append(facts, "- "+rest)
+			} else if strings.HasPrefix(line, "- ") {
+				facts = append(facts, line) // строки прежней сводки
+			}
+		}
+		return strings.Join(facts, "\n")
+	}
 	q := msgs[len(msgs)-1].Content
 	if !strings.Contains(q, "как меня зовут") {
 		return "ответ на: " + q
 	}
+	// Имя ищется в репликах пользователя и в системном промпте — туда
+	// стратегия summary кладёт сводку старой части разговора.
 	for _, m := range msgs[:len(msgs)-1] {
-		if m.Role == llm.RoleUser {
+		if m.Role == llm.RoleUser || m.Role == llm.RoleSystem {
 			if _, name, ok := strings.Cut(m.Content, "меня зовут "); ok {
+				name, _, _ = strings.Cut(name, "\n")
 				return "тебя зовут " + name
 			}
 		}

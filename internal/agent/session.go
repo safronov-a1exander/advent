@@ -45,6 +45,9 @@ type Snapshot struct {
 	// старые файлы читаются как есть, просто без учёта по ходам.
 	Turns       []Turn  `json:"turns,omitempty"`
 	Calibration float64 `json:"calibration,omitempty"`
+	// Summary — сводка старой части разговора (день 9). История при этом
+	// лежит в History целиком: сводка — про контекст, а не про память.
+	Summary *summaryState `json:"summary,omitempty"`
 }
 
 // Store — куда пул сохраняет агентов.
@@ -76,7 +79,15 @@ func (a *Agent) snapshot() Snapshot {
 
 		Turns:       append([]Turn(nil), a.turns...),
 		Calibration: a.calib,
+		Summary:     summaryPtr(a.summary),
 	}
+}
+
+func summaryPtr(s summaryState) *summaryState {
+	if s.Text == "" {
+		return nil
+	}
+	return &s
 }
 
 // FileStore — по JSON-файлу на агента в одном каталоге.

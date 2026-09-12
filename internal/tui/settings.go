@@ -36,6 +36,11 @@ type Settings struct {
 	// День 8 — собственный лимит контекста агента.
 	ContextLimit *int
 
+	// День 9 — стратегия контекста и параметры сжатия.
+	Context        string
+	KeepLast       *int
+	SummarizeEvery *int
+
 	// День 3 — способ рассуждения. Только для чата: в сценариях цепочки
 	// описаны явно через steps.
 	Strategy string
@@ -239,6 +244,24 @@ func (s *Settings) Fields() []Field {
 			func() *int { return s.ContextLimit },
 			func(v *int) { s.ContextLimit = v },
 			500, 200, 1000000, 4000))
+
+		// День 9 — как собирать контекст из истории.
+		ctx := EnumField("контекст", "", agent.ContextStrategies,
+			func() string { return s.Context },
+			func(v string) { s.Context = v })
+		ctx.Value = func() string { return agent.ContextLabel(s.Context) }
+		ctx.HintFn = func() string { return agent.ContextHint(s.Context) }
+		f = append(f, ctx,
+			IntField("хвост как есть",
+				"сколько последних сообщений идёт в запрос без сжатия (для summary); пусто — 4",
+				func() *int { return s.KeepLast },
+				func(v *int) { s.KeepLast = v },
+				2, 0, 100, 4),
+			IntField("сжимать каждые",
+				"сжатие запускается, когда за хвостом накопилось столько сообщений (для summary); пусто — 10",
+				func() *int { return s.SummarizeEvery },
+				func(v *int) { s.SummarizeEvery = v },
+				2, 2, 200, 10))
 	}
 
 	if s.Overlay {
@@ -289,6 +312,9 @@ func (s *Settings) AgentConfig() agent.Config {
 		Stop:           s.Stop,
 		ResponseFormat: s.ResponseFormat,
 		ContextLimit:   s.ContextLimit,
+		Context:        s.Context,
+		KeepLast:       s.KeepLast,
+		SummarizeEvery: s.SummarizeEvery,
 	}.Clone()
 }
 
@@ -308,6 +334,9 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.Stop = c.Stop
 	s.ResponseFormat = c.ResponseFormat
 	s.ContextLimit = c.ContextLimit
+	s.Context = c.Context
+	s.KeepLast = c.KeepLast
+	s.SummarizeEvery = c.SummarizeEvery
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.
