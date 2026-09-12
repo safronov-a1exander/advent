@@ -69,6 +69,7 @@ func main() {
 	addr := flag.String("addr", ":8099", "адрес прослушивания")
 	delay := flag.Duration("delay", 25*time.Millisecond, "задержка между токенами в потоке")
 	words := flag.Int("words", 45, "сколько слов генерировать")
+	window := flag.Int("window", 0, "окно контекста модели в токенах; 0 — без ограничения. Запрос больше окна получает 400, как у настоящего API")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -135,9 +136,32 @@ func main() {
 		if req.MaxTokens != nil && len(source) > *req.MaxTokens {
 			finish = "length"
 		}
+		// Токены запроса — примерно как у настоящего токенизатора на смешанном
+		// русском тексте: символ-другой на токен плюс шаблон сообщения. Раньше
+		// считались слова, и запрос на заглушке выходил втрое легче, чем на API.
 		promptTokens := 0
 		for _, m := range req.Messages {
-			promptTokens += len(strings.Fields(m.Content)) + 4
+			promptTokens += len([]rune(m.Content))/2 + 4
+		}
+
+		// Окно контекста: запрос вместе с потолком ответа не должен его
+		// превышать. Отказ — тот же 400 с context_length_exceeded, что отдают
+		// OpenAI-совместимые API, поэтому клиент проходит ровно тот же путь.
+		if *window > 0 {
+			need := promptTokens
+			if req.MaxTokens != nil {
+				need += *req.MaxTokens
+			}
+			if need > *window {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{"error": map[string]any{
+					"message": fmt.Sprintf("This model's maximum context length is %d tokens. However, you requested %d tokens (%d in the messages, %d in the completion). Please reduce the length of the messages or completion.",
+						*window, need, promptTokens, need-promptTokens),
+					"type": "invalid_request_error",
+					"code": "context_length_exceeded",
+				}})
+				return
+			}
 		}
 
 		if !req.Stream {

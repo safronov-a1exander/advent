@@ -37,6 +37,11 @@ type askFlags struct {
 	raw         bool
 	runID       string
 
+	// contextLimit — стартовый лимит контекста агента (день 8); 0 — нет.
+	contextLimit int
+	// thinking — стартовый режим рассуждений: "", enabled или disabled.
+	thinking string
+
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
 }
@@ -50,6 +55,8 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.BoolVar(&a.stream, "stream", true, "потоковый вывод")
 	fs.BoolVar(&a.raw, "raw", false, "печатать только текст ответа, без метрик")
 	fs.StringVar(&a.runID, "run", "", "имя файла журнала в runs/ (по умолчанию с меткой времени)")
+	fs.IntVar(&a.contextLimit, "context-limit", 0, "лимит контекста агента в токенах для chat/demo (0 — только окно модели)")
+	fs.StringVar(&a.thinking, "thinking", "", "режим рассуждений для chat/demo: enabled | disabled (пусто — как у модели)")
 	return a
 }
 
@@ -194,6 +201,15 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	// Флаги задают лишь стартовые значения — дальше всё крутится в панели.
 	set := tui.NewSettings(prov.Models, req.Model, a.system)
 	set.Stream = a.stream
+	if a.contextLimit > 0 {
+		set.ContextLimit = llm.I(a.contextLimit)
+	}
+	switch a.thinking {
+	case "", "enabled", "disabled":
+		set.Thinking = a.thinking
+	default:
+		return fmt.Errorf("-thinking: ожидали enabled или disabled, получили %q", a.thinking)
+	}
 
 	// Экран не ходит в API сам: он говорит с агентами из пула, а пул
 	// пишет каждый вызов в тот же журнал runs/*.jsonl.

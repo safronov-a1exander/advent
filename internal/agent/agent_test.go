@@ -23,6 +23,8 @@ type fakeLLM struct {
 	delay    time.Duration
 	inFlight atomic.Int32
 	peak     atomic.Int32
+	// usage — как «провайдер» считает токены; nil — 10 на сообщение
+	usage func([]llm.Message) llm.Usage
 }
 
 func (f *fakeLLM) Name() string                                 { return "fake" }
@@ -47,11 +49,15 @@ func (f *fakeLLM) Chat(ctx context.Context, req llm.Request) (*llm.Response, err
 	if fail != nil {
 		return nil, fail
 	}
+	u := llm.Usage{PromptTokens: 10 * len(req.Messages), CompletionTokens: 5}
+	if f.usage != nil {
+		u = f.usage(req.Messages)
+	}
 	return &llm.Response{
 		Model:        req.Model,
 		Content:      answer(req.Messages),
 		FinishReason: "stop",
-		Usage:        llm.Usage{PromptTokens: 10 * len(req.Messages), CompletionTokens: 5},
+		Usage:        u,
 		CostUSD:      0.001,
 	}, nil
 }

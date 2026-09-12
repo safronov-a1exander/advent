@@ -1,0 +1,33 @@
+# День 8, часть 2 — переполнение на стороне провайдера.
+#
+# Заглушка mockllm с окном модели 700 токенов (-window 700), у агента своего
+# лимита нет. Так же, HTTP 400 с context_length_exceeded, отвечают
+# OpenAI-совместимые API, когда запрос не влезает в окно модели.
+
+speed 2ms
+sleep 1500ms
+
+note Теперь без лимита агента: окно модели кончается у провайдера. Заглушка с окном 700 токенов.
+sleep 6s
+
+type Выписка: 31.08 OZON MARKETPLACE 1990; 05.09 PYATEROCHKA 5643 MOSCOW RUS 2340; 05.09 DRINKIT COFFEE MSK 390; 06.09 YANDEX.TAXI 620; 07.09 WILDBERRIES 4150; 08.09 WILDBERRIES REFUND -1800; 09.09 TRANSFER TO OWN SAVINGS ACC 10000; 10.09 SAMOKAT DOSTAVKA 1205. Что тут самое крупное?
+sleep 600ms
+key enter
+wait 120s
+sleep 3s
+
+type Продолжение: 11.09 YANDEX EDA 1480; 12.09 APTEKA GORZDRAV 118 870; 12.09 SPORTLIFE ABONEMENT 1M 3500; 13.09 RZD TICKET 2E 2960; 14.09 YANDEX EDA REFUND -480; 15.09 ATM CASH WITHDRAWAL 5000; 16.09 SPOTIFY PREMIUM 10 USD. А теперь?
+sleep 600ms
+key enter
+wait 120s
+sleep 3s
+
+type Сведи обе части в одну таблицу по категориям и посчитай итог по каждой категории отдельно.
+sleep 600ms
+key enter
+wait 120s
+sleep 6s
+
+note Провайдер отклонил запрос: HTTP 400, context_length_exceeded. В отличие от лимита агента, запрос уже ушёл и время потрачено.
+sleep 9s
+quit

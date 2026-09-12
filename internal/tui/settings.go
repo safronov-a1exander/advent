@@ -33,6 +33,9 @@ type Settings struct {
 	Stop           []string
 	ResponseFormat string
 
+	// День 8 — собственный лимит контекста агента.
+	ContextLimit *int
+
 	// День 3 — способ рассуждения. Только для чата: в сценариях цепочки
 	// описаны явно через steps.
 	Strategy string
@@ -228,6 +231,16 @@ func (s *Settings) Fields() []Field {
 			func(v string) { s.ResponseFormat = v }),
 	)
 
+	// День 8 — собственный лимит контекста агента. В сценариях lab его нет:
+	// там каждый вариант — отдельный запрос без истории.
+	if !s.Overlay {
+		f = append(f, IntField("лимит контекста",
+			"свой потолок агента в токенах, меньше окна модели; запрос сверх него не отправляется. Пусто — решает окно модели",
+			func() *int { return s.ContextLimit },
+			func(v *int) { s.ContextLimit = v },
+			500, 200, 1000000, 4000))
+	}
+
 	if s.Overlay {
 		f = append(f, IntField("повторов",
 			"сколько раз прогнать каждый вариант; больше одного — видно стабильность",
@@ -275,6 +288,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		MaxTokens:      s.MaxTokens,
 		Stop:           s.Stop,
 		ResponseFormat: s.ResponseFormat,
+		ContextLimit:   s.ContextLimit,
 	}.Clone()
 }
 
@@ -293,6 +307,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.MaxTokens = c.MaxTokens
 	s.Stop = c.Stop
 	s.ResponseFormat = c.ResponseFormat
+	s.ContextLimit = c.ContextLimit
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

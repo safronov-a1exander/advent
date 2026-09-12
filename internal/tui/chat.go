@@ -333,6 +333,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.dumpAgent()
 		return m, nil
 
+	case "ctrl+t":
+		m.dumpTokens()
+		return m, nil
+
 	case "ctrl+n":
 		if m.busy.Load() {
 			m.flash = "дождись ответа, потом заводи нового агента"
@@ -561,19 +565,15 @@ func (m *Model) finish(reply *agent.Reply, err error) {
 		if body != "" {
 			m.pushLine(body)
 		}
-		m.pushLine(stErr.Render("ошибка: " + err.Error()))
-		m.pushLine(stDim.Render("  вопрос в историю агента не попал — его можно задать заново"))
+		for _, l := range m.explainError(err) {
+			m.pushLine(l)
+		}
 		m.refresh()
 		return
 	}
 
-	resp := reply.Final
 	m.pushLine(body)
-	m.pushLine(stDim.Render(fmt.Sprintf(
-		"  ↳ finish_reason=%s  latency=%s  prompt=%d  completion=%d  reasoning=%d  $%.6f",
-		resp.FinishReason, resp.Latency.Round(time.Millisecond),
-		resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
-		resp.Usage.ReasoningTokens, resp.CostUSD)))
+	m.pushLine(stDim.Render(m.tokenLine(reply)))
 	m.refresh()
 }
 
@@ -722,8 +722,8 @@ func (m *Model) status() string {
 	// Счётчики справа важнее подсказки слева, поэтому место под них
 	// резервируется первым, а подсказка ужимается под остаток.
 	sp := m.pool.Spent()
-	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
-		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
+	right := fmt.Sprintf("%s · вызовов %d · токенов %d↑ %d↓ · $%.6f",
+		m.contextLabel(), sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
 	avail := m.w - lipgloss.Width(right) - 4
 
 	var prefix string
@@ -756,7 +756,7 @@ func (m *Model) status() string {
 			m.agentKeys.New, m.agentKeys.Close, m.agentKeys.Back)
 	default:
 		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Debug,
-			m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
+			m.keys.Tokens, m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
 	}
 	left = prefix + left
 	if m.flash != "" {

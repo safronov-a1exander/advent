@@ -1,0 +1,106 @@
+# День 8, часть 1 — токены: короткий диалог, длинный, переполнение.
+#
+# Запуск с -thinking disabled: иначе рассуждения flash растягивают каждый
+# ответ на минуты и тысячи токенов, и сценарий не укладывается в ожидание.
+# Запуск с собственным лимитом контекста агента 2500 токенов — окно модели
+# у DeepSeek миллион, и упираться в него ради видео нет смысла. Лимит агента —
+# честная модель переполнения: запрос сверх него не уходит в API.
+# Вторая часть (day08-provider.demo) показывает отказ самого провайдера.
+
+speed 16ms
+sleep 1500ms
+
+note Считаем токены: сколько весит вопрос, сколько история, сколько ответ. Лимит контекста агента — 2500.
+sleep 6s
+
+note Короткий диалог.
+sleep 2s
+type Привет! Меня зовут Саша, веду бюджет на сентябрь.
+sleep 600ms
+key enter
+wait 180s
+sleep 3s
+
+type Сколько будет 60000 минус 38865? Одним числом.
+sleep 600ms
+key enter
+wait 180s
+sleep 4s
+
+note Под ответом: вопрос ~, история, весь запрос, ответ. Справа внизу — заполнение контекста.
+sleep 6s
+
+note Ctrl+T — таблица по ходам: запрос растёт, хотя вопросы короткие.
+sleep 3s
+key ctrl+t
+sleep 8s
+
+note Длинный диалог — в новом агенте, чтобы сравнить. Вставляем банковскую выписку.
+sleep 3s
+key ctrl+n
+sleep 2s
+speed 2ms
+type Вот моя выписка за сентябрь: 31.08 OZON MARKETPLACE 1990; 05.09 PYATEROCHKA 5643 MOSCOW RUS 2340; 05.09 DRINKIT COFFEE MSK 390; 06.09 YANDEX.TAXI 620; 07.09 WILDBERRIES 4150; 08.09 WILDBERRIES REFUND -1800; 09.09 TRANSFER TO OWN SAVINGS ACC 10000; 10.09 SAMOKAT DOSTAVKA 1205; 11.09 YANDEX EDA 1480; 12.09 APTEKA GORZDRAV 118 870; 12.09 SPORTLIFE ABONEMENT 1M 3500; 13.09 RZD TICKET 2E 2960; 14.09 YANDEX EDA REFUND -480; 15.09 ATM CASH WITHDRAWAL 5000; 16.09 SPOTIFY PREMIUM 10 USD. Разложи траты по категориям с суммами.
+speed 16ms
+sleep 600ms
+key enter
+wait 600s
+sleep 4s
+
+type Подробно распиши, где можно сэкономить в каждой категории, с конкретными цифрами.
+sleep 600ms
+key enter
+wait 600s
+sleep 4s
+
+note Вопрос по-прежнему весит пару десятков токенов, а запрос уже — вся выписка и все ответы.
+sleep 6s
+
+type Составь недельный план трат до конца месяца по дням.
+sleep 600ms
+key enter
+wait 600s
+sleep 4s
+
+type Сведи всё в итоговую таблицу: категория, потрачено, лимит на следующий месяц.
+sleep 600ms
+key enter
+wait 600s
+sleep 4s
+
+type И последний вопрос: какая категория самая проблемная и почему?
+sleep 600ms
+key enter
+wait 600s
+sleep 5s
+
+note Если лимит ещё не кончился — упрёмся следующим вопросом.
+sleep 3s
+type Повтори коротко главный вывод.
+sleep 600ms
+key enter
+wait 600s
+sleep 6s
+
+note Ctrl+T для длинного диалога: история — почти весь запрос, каждый ход оплачивает её заново.
+sleep 3s
+key ctrl+t
+sleep 10s
+
+note Ctrl+O — оба разговора рядом: короткий и длинный.
+sleep 3s
+key ctrl+o
+sleep 6s
+key esc
+sleep 2s
+
+note Что ломается при переполнении: разговор дальше не идёт. Ctrl+R — сброс, и агент снова отвечает, но всё забыл.
+sleep 7s
+key ctrl+r
+sleep 2s
+type Как меня зовут и что было в выписке?
+sleep 600ms
+key enter
+wait 180s
+sleep 7s
+quit
