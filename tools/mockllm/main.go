@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -109,9 +110,12 @@ func main() {
 
 		var source []string
 		var sep string
-		if wantJSON {
+		switch {
+		case wantJSON:
 			source, sep = chunkJSON(sampleJSON), ""
-		} else {
+		case recallQuestion(req.Messages):
+			source, sep = strings.Fields(recall(req.Messages)), " "
+		default:
 			source, sep = lorem, " "
 		}
 
@@ -137,6 +141,10 @@ func main() {
 		}
 
 		if !req.Stream {
+			// Настоящая модель тратит время на каждый токен и без стриминга —
+			// просто отдаёт всё разом в конце. Без этой паузы параллельные
+			// запросы на заглушке выглядели бы мгновенными и ничего не показывали.
+			time.Sleep(time.Duration(len(out)) * *delay)
 			writeJSON(w, map[string]any{
 				"id": "mock", "model": req.Model,
 				"choices": []map[string]any{{
@@ -187,6 +195,42 @@ func main() {
 
 	log.Printf("mockllm слушает %s (base_url http://127.0.0.1%s/v1)", *addr, *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
+}
+
+// Заглушка, как и настоящая модель, не помнит прошлых запросов: она видит
+// только сообщения текущего. Поэтому на «как меня зовут» она отвечает
+// по истории, пришедшей в запросе, — и если агент историю не передал,
+// ответ честно будет «не знаю». Так на репетиции проверяется ровно то,
+// что проверяется на живом API: память живёт у агента, а не у модели.
+var nameRe = regexp.MustCompile(`(?i)меня зовут\s+([\p{L}-]+)`)
+
+func recallQuestion(msgs []message) bool {
+	last := lastUser(msgs)
+	return last >= 0 && strings.Contains(strings.ToLower(msgs[last].Content), "как меня зовут")
+}
+
+func recall(msgs []message) string {
+	last := lastUser(msgs)
+	for i := last - 1; i >= 0; i-- {
+		// Прошлые вопросы «как меня зовут и …» — не представление:
+		// иначе регулярка вытащит из них «и» вместо имени.
+		if msgs[i].Role != "user" || recallQuestion(msgs[:i+1]) {
+			continue
+		}
+		if m := nameRe.FindStringSubmatch(msgs[i].Content); m != nil {
+			return "Тебя зовут " + m[1] + " — ты сам сказал это раньше в нашем разговоре."
+		}
+	}
+	return "Не знаю: в этом разговоре ты не представлялся."
+}
+
+func lastUser(msgs []message) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return i
+		}
+	}
+	return -1
 }
 
 // chunkJSON режет строку на кусочки по нескольку символов.

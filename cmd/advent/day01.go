@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/store"
@@ -188,11 +189,12 @@ func runTUI(ctx context.Context, a *askFlags, acts []tui.Action, title string) e
 	set := tui.NewSettings(prov.Models, req.Model, a.system)
 	set.Stream = a.stream
 
+	// Экран не ходит в API сам: он говорит с агентами из пула, а пул
+	// пишет каждый вызов в тот же журнал runs/*.jsonl.
 	m := tui.NewModel(tui.Options{
-		Client:   client,
+		Pool:     agent.NewPool(client, prov.Name, w),
 		Provider: prov.Name,
 		Settings: set,
-		Store:    w,
 		Title:    title,
 	})
 	p := tea.NewProgram(m, tea.WithContext(ctx))

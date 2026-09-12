@@ -1,13 +1,17 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
+	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
 )
 
-// Settings — параметры запроса, которые крутятся прямо в интерфейсе.
+// Settings — параметры, которые крутятся прямо в интерфейсе.
+//
+// С шестого дня это редактор конфига агента: панель правит поля, а перед
+// каждым вопросом они уходят в агента через AgentConfig. Сам запрос
+// экран больше не собирает.
 //
 // Каждый шаг дописывает сюда своё, а Fields() отдаёт панели
 // актуальный набор. За счёт этого на ветке дня N доступны все параметры
@@ -91,11 +95,11 @@ func (s *Settings) modelField() Field {
 // strategyField — способ рассуждения, добавленный на шаге 3.
 // Подсказка меняется вместе со значением, поэтому HintFn, а не Hint.
 func (s *Settings) strategyField() Field {
-	f := EnumField("стратегия", "", Strategies,
+	f := EnumField("стратегия", "", agent.Strategies,
 		func() string { return s.Strategy },
 		func(v string) { s.Strategy = v })
-	f.Value = func() string { return strategyLabel(s.Strategy) }
-	f.HintFn = func() string { return StrategyHint(s.Strategy) }
+	f.Value = func() string { return agent.StrategyLabel(s.Strategy) }
+	f.HintFn = func() string { return agent.StrategyHint(s.Strategy) }
 	return f
 }
 
@@ -257,56 +261,39 @@ func splitList(v string) []string {
 	return out
 }
 
-// Apply переносит настройки в запрос к API.
-func (s *Settings) Apply(req *llm.Request) {
-	req.Model = s.Model
-	req.Temperature = s.Temperature
-	req.TopP = s.TopP
-	req.Seed = s.Seed
-	if s.Thinking != "" {
-		req.Thinking = &llm.Thinking{Type: s.Thinking}
-	} else {
-		req.Thinking = nil
-	}
-	req.MaxTokens = s.MaxTokens
-	req.Stop = s.Stop
-	if s.ResponseFormat != "" {
-		req.ResponseFormat = &llm.ResponseFormat{Type: s.ResponseFormat}
-	} else {
-		req.ResponseFormat = nil
-	}
+// AgentConfig — снимок панели в виде конфига агента.
+func (s *Settings) AgentConfig() agent.Config {
+	return agent.Config{
+		Model:          s.Model,
+		System:         s.System,
+		Strategy:       s.Strategy,
+		Stream:         s.Stream,
+		Temperature:    s.Temperature,
+		TopP:           s.TopP,
+		Thinking:       s.Thinking,
+		Seed:           s.Seed,
+		MaxTokens:      s.MaxTokens,
+		Stop:           s.Stop,
+		ResponseFormat: s.ResponseFormat,
+	}.Clone()
+}
+
+// LoadConfig показывает в панели конфиг агента — при переключении
+// между агентами панель должна показывать настройки того, с кем говоришь.
+func (s *Settings) LoadConfig(c agent.Config) {
+	c = c.Clone()
+	s.Model = c.Model
+	s.System = c.System
+	s.Strategy = c.Strategy
+	s.Stream = c.Stream
+	s.Temperature = c.Temperature
+	s.TopP = c.TopP
+	s.Thinking = c.Thinking
+	s.Seed = c.Seed
+	s.MaxTokens = c.MaxTokens
+	s.Stop = c.Stop
+	s.ResponseFormat = c.ResponseFormat
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.
-// Имя модели сюда не входит: оно и так печатается рядом.
-func (s *Settings) Summary() string {
-	var parts []string
-	if s.Strategy != "" {
-		parts = append(parts, s.Strategy)
-	}
-	if s.Temperature != nil {
-		parts = append(parts, fmt.Sprintf("t=%g", *s.Temperature))
-	}
-	if s.TopP != nil {
-		parts = append(parts, fmt.Sprintf("top_p=%g", *s.TopP))
-	}
-	if s.Thinking != "" {
-		parts = append(parts, "think="+s.Thinking)
-	}
-	if s.Seed != nil {
-		parts = append(parts, fmt.Sprintf("seed=%d", *s.Seed))
-	}
-	if s.MaxTokens != nil {
-		parts = append(parts, fmt.Sprintf("max=%d", *s.MaxTokens))
-	}
-	if len(s.Stop) > 0 {
-		parts = append(parts, "stop="+strings.Join(s.Stop, "|"))
-	}
-	if s.ResponseFormat != "" {
-		parts = append(parts, "fmt="+s.ResponseFormat)
-	}
-	if !s.Stream {
-		parts = append(parts, "без стриминга")
-	}
-	return strings.Join(parts, " · ")
-}
+func (s *Settings) Summary() string { return s.AgentConfig().Summary() }
