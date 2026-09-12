@@ -185,7 +185,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (*Response, error) {
 	if wr.Usage != nil {
 		out.Usage = toUsage(wr.Usage)
 	}
-	out.CostUSD = c.Cost(out.Model, out.Usage)
+	out.CostUSD = c.costOf(out.Model, req.Model, out.Usage)
 	return out, nil
 }
 
@@ -247,7 +247,7 @@ func (c *Client) ChatStream(ctx context.Context, req Request, onChunk func(Chunk
 	out.Content = content.String()
 	out.Reasoning = reasoning.String()
 	out.Latency = time.Since(start)
-	out.CostUSD = c.Cost(out.Model, out.Usage)
+	out.CostUSD = c.costOf(out.Model, req.Model, out.Usage)
 	if onChunk != nil {
 		if err := onChunk(Chunk{Done: true}); err != nil {
 			return nil, err
@@ -284,6 +284,20 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 		ids = append(ids, m.ID)
 	}
 	return ids, nil
+}
+
+// costOf — стоимость ответа. Прайс ищется сначала по модели, которую
+// назвал сервер, потом по той, что просили.
+//
+// Провайдеры переименовывают модели и держат старые имена алиасами:
+// DeepSeek на запрос deepseek-v4-flash отвечает моделью deepseek-flash.
+// Если искать только по имени из ответа, колонка стоимости молча
+// обнуляется, и расход в отчётах выглядит бесплатным.
+func (c *Client) costOf(served, requested string, u Usage) float64 {
+	if _, ok := c.pricing[served]; ok {
+		return c.Cost(served, u)
+	}
+	return c.Cost(requested, u)
 }
 
 // Cost считает стоимость по прайсу из конфига. Кэш-хиты тарифицируются дешевле.

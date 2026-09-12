@@ -29,7 +29,8 @@ go run ./cmd/advent models
 
 - [ ] `doctor` пишет «стенд готов»;
 - [ ] имена моделей из `GET /models` совпадают с `config.yaml`
-      (`deepseek-v4-flash`, `deepseek-v4-pro`);
+      (`deepseek-flash`, `deepseek-v4-pro`; старые имена провайдер
+      держит алиасами — стоимость всё равно посчитается, но лучше сверить);
 - [ ] **цены в `config.yaml` заменены на реальные** с
       https://api-docs.deepseek.com/quick_start/pricing — иначе колонка
       стоимости во всех отчётах врёт, а на шаге 5 она и есть предмет сравнения;
