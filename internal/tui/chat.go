@@ -27,6 +27,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/agent"
+	"github.com/safronov-a1exander/advent/internal/llm"
 )
 
 // ---- сообщения ----
@@ -53,11 +54,20 @@ const defaultTitle = "Бюджет · ассистент по личным тр�
 
 // Options — то, что нужно экрану чата для работы.
 type Options struct {
-	// Pool — откуда брать агентов. Первый агент порождается из Settings.
+	// Pool — откуда брать агентов. Если в пуле уже есть восстановленные
+	// разговоры, открывается последний; иначе агент порождается из Settings.
 	Pool     *agent.Pool
 	Provider string
 	Settings *Settings
 	Title    string
+
+	// Resume — id разговора, который открыть при старте.
+	Resume string
+	// Fresh — начать новый разговор, даже если есть сохранённые.
+	Fresh bool
+	// Notice — строка в начало ленты: например, что часть разговоров
+	// не удалось прочитать.
+	Notice string
 }
 
 type focusTarget int
@@ -144,7 +154,10 @@ func NewModel(o Options) *Model {
 	}
 	m.pool = o.Pool
 	m.transcripts = map[string][]string{}
-	m.ag = m.spawn()
+	m.ag = m.pickStartAgent()
+	if o.Notice != "" {
+		m.lines = append([]string{stErr.Render(o.Notice), ""}, m.lines...)
+	}
 	m.panel = NewPanel(m.set.Fields(), 34)
 	m.notes = NewNotes(60, notesHeight)
 	return m
@@ -214,6 +227,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.busy.Store(false)
 		m.finish(msg.reply, msg.err)
+		if err := m.pool.SaveErr(); err != nil {
+			m.pushLine(stErr.Render(err.Error()))
+			m.refresh()
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -384,6 +401,56 @@ func (m *Model) resetConversation() {
 	m.pushLine("")
 	m.pushLine(stDim.Render("— контекст агента " + m.ag.ID() + " сброшен (счётчики расхода не обнуляются) —"))
 	m.refresh()
+}
+
+// pickStartAgent — с кем разговаривать при запуске. Сохранённые разговоры
+// уже подняты в пул; открываем тот, что просили, или последний по времени,
+// чтобы после перезапуска продолжить ровно с того места.
+func (m *Model) pickStartAgent() *agent.Agent {
+	var pick *agent.Agent
+	if id := m.opts.Resume; id != "" {
+		a, ok := m.pool.Get(id)
+		if !ok {
+			m.lines = append(m.lines, stErr.Render("разговор "+id+" не найден — начинаю новый"), "")
+		}
+		pick = a
+	} else if !m.opts.Fresh {
+		for _, a := range m.pool.List() {
+			if pick == nil || a.Updated().After(pick.Updated()) {
+				pick = a
+			}
+		}
+	}
+	if pick == nil {
+		return m.spawn()
+	}
+	m.set.LoadConfig(pick.Config())
+	m.lines = append(m.lines, m.replay(pick)...)
+	return pick
+}
+
+// replay рисует ленту восстановленного разговора из истории агента:
+// после перезапуска на экране должна быть та же переписка, что и до него.
+func (m *Model) replay(a *agent.Agent) []string {
+	hist := a.History()
+	model := a.Config().Model
+	var out []string
+	where := ""
+	if st := m.pool.Store(); st != nil {
+		where = " из " + st.Path(a.ID())
+	}
+	out = append(out, stDim.Render(fmt.Sprintf("— разговор %s восстановлен%s · сообщений %d · обновлён %s —",
+		a.ID(), where, len(hist), a.Updated().Format("02.01 15:04"))))
+	for _, msg := range hist {
+		out = append(out, "")
+		switch msg.Role {
+		case llm.RoleUser:
+			out = append(out, stUser.Render("вы:"), msg.Content)
+		default:
+			out = append(out, stBot.Render(model+":"), msg.Content)
+		}
+	}
+	return out
 }
 
 // spawn порождает агента из текущих настроек панели.

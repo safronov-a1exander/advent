@@ -20,6 +20,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -88,14 +89,14 @@ func (r *Reply) Usage() (u llm.Usage, cost float64) {
 
 // Stats — накопленный расход агента.
 type Stats struct {
-	Turns      int // ходов диалога, закончившихся ответом
-	Calls      int // вызовов API, включая промежуточные шаги
-	Errors     int
-	Prompt     int
-	Completion int
-	Reasoning  int
-	Cached     int
-	CostUSD    float64
+	Turns      int     `json:"turns"` // ходов диалога, закончившихся ответом
+	Calls      int     `json:"calls"` // вызовов API, включая промежуточные шаги
+	Errors     int     `json:"errors"`
+	Prompt     int     `json:"prompt_tokens"`
+	Completion int     `json:"completion_tokens"`
+	Reasoning  int     `json:"reasoning_tokens"`
+	Cached     int     `json:"cached_tokens"`
+	CostUSD    float64 `json:"cost_usd"`
 }
 
 func (s *Stats) add(r *llm.Response) {
@@ -116,6 +117,12 @@ type Agent struct {
 	journal  Journal
 	// onCall — пул узнаёт о каждом вызове, чтобы вести общий счётчик.
 	onCall func(*llm.Response, error)
+	// onChange — разговор или конфиг поменялись; пул сохраняет агента.
+	onChange func(*Agent)
+	// temp — временный агент (сравнение моделей): на диск не пишется.
+	temp bool
+	// saved — агент уже лежит в хранилище (сохранён или поднят оттуда).
+	saved atomic.Bool
 
 	busy atomic.Bool
 
@@ -124,6 +131,11 @@ type Agent struct {
 	history []llm.Message // только user/assistant; system подставляется при отправке
 	stats   Stats
 	created time.Time
+	updated time.Time
+	// rev растёт при каждом изменении, которое стоит сохранить. По нему
+	// хранилище отбрасывает запоздавший старый снимок, если два сохранения
+	// одного агента разминулись.
+	rev uint64
 	// gen растёт при сбросе контекста. Ответ, начатый до сброса, не должен
 	// вернуть в историю то, что пользователь только что стёр.
 	gen uint64
@@ -149,8 +161,16 @@ func (a *Agent) Config() Config {
 // при этом не трогается — можно сменить модель посреди разговора.
 func (a *Agent) SetConfig(c Config) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	if reflect.DeepEqual(a.cfg, c) {
+		// Экран отдаёт конфиг перед каждым вопросом; без проверки
+		// каждый вопрос означал бы лишнюю запись на диск.
+		a.mu.Unlock()
+		return
+	}
 	a.cfg = c.Clone()
+	a.touch()
+	a.mu.Unlock()
+	a.changed()
 }
 
 // History — копия истории диалога.
@@ -184,9 +204,35 @@ func (a *Agent) Stats() Stats {
 // Reset стирает историю. Счётчики расхода остаются: деньги уже потрачены.
 func (a *Agent) Reset() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.history = nil
 	a.gen++
+	a.touch()
+	a.mu.Unlock()
+	a.changed()
+}
+
+// Updated — когда разговор или конфиг менялись последний раз.
+func (a *Agent) Updated() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.updated
+}
+
+// Temp — временный ли агент (не сохраняется между запусками).
+func (a *Agent) Temp() bool { return a.temp }
+
+// touch отмечает изменение; вызывать под a.mu.
+func (a *Agent) touch() {
+	a.rev++
+	a.updated = time.Now()
+}
+
+// changed сообщает пулу об изменении; вызывать без a.mu —
+// сохранение само снимает копию под замком.
+func (a *Agent) changed() {
+	if a.onChange != nil {
+		a.onChange(a)
+	}
 }
 
 // Messages — стек, который уйдёт в API при следующем вопросе text:
@@ -283,7 +329,9 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 			llm.Message{Role: llm.RoleAssistant, Content: reply.Final.Content})
 	}
 	a.stats.Turns++
+	a.touch()
 	a.mu.Unlock()
+	a.changed()
 	return reply, nil
 }
 

@@ -60,7 +60,8 @@ func (m *Model) startBench() tea.Cmd {
 		cfg := base.Clone()
 		cfg.Name = "bench"
 		cfg.Model = mi.ID
-		a := m.pool.Spawn(cfg)
+		// временные: сравнение не должно оставлять разговоров в списке
+		a := m.pool.SpawnTemp(cfg)
 		agents = append(agents, a)
 		tiers[a.ID()] = mi.Tier
 	}
