@@ -37,9 +37,9 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\win.ps1"
 
-if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-  throw "ffmpeg не найден в PATH. Установи: winget install Gyan.FFmpeg"
-}
+# ffmpeg нередко стоит вне PATH — резолвер находит его и чинит PATH сессии,
+# чтобы вызовы ниже работали просто по имени.
+[void](Resolve-Ffmpeg)
 
 $outDir = Split-Path -Parent $Out
 if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
