@@ -643,7 +643,11 @@ func (m *Model) refresh() {
 		w = 20
 	}
 	m.vp.SetContent(lipgloss.NewStyle().Width(w).Render(body))
-	m.vp.GotoBottom()
+	// К низу только если читатель там и был: отлистал вверх посреди ответа —
+	// очередной кусок текста не должен дёргать экран обратно.
+	if m.follow {
+		m.vp.GotoBottom()
+	}
 }
 
 func (m *Model) View() tea.View {
