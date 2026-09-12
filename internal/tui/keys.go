@@ -150,6 +150,9 @@ func shortHelp(h help.Model, bindings ...key.Binding) string {
 	h.Styles.ShortKey = stDim
 	h.Styles.ShortDesc = stDim
 	h.Styles.ShortSeparator = stDim
+	// многоточие, когда подсказка не влезла; стиль по умолчанию на тёмном
+	// фоне почти не виден, и обрыв выглядит как висящий разделитель
+	h.Styles.Ellipsis = stDim
 
 	live := make([]key.Binding, 0, len(bindings))
 	for _, b := range bindings {

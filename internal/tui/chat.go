@@ -718,6 +718,26 @@ func (m *Model) frame(focused bool) lipgloss.Style {
 }
 
 func (m *Model) status() string {
+	// Расход всего пула: сюда же попадают вызовы агентов сравнения по Ctrl+E.
+	// Счётчики справа важнее подсказки слева, поэтому место под них
+	// резервируется первым, а подсказка ужимается под остаток.
+	sp := m.pool.Spent()
+	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
+		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
+	avail := m.w - lipgloss.Width(right) - 4
+
+	var prefix string
+	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
+	// подсказываем, чем вернуться.
+	if !m.follow {
+		prefix = stNote.Render("↑ отлистано, End — к последнему ответу") + "  "
+	}
+	// help.Model с заданной шириной сам отбрасывает привязки, которые
+	// не влезают, и ставит многоточие, — а не режет посреди слова.
+	h := m.help
+	// два символа запаса — под многоточие, которое help дописывает сам
+	h.SetWidth(avail - lipgloss.Width(prefix) - 2)
+
 	// Подсказка собирается из тех же привязок, по которым работают клавиши,
 	// поэтому не может разойтись с поведением (см. keys.go).
 	var left string
@@ -725,31 +745,26 @@ func (m *Model) status() string {
 	case m.busy.Load():
 		left = m.sp.View() + " ждём ответ…"
 	case m.panel.Editing():
-		left = shortHelp(m.help, m.editKeys.Apply, m.editKeys.Cancel)
+		left = shortHelp(h, m.editKeys.Apply, m.editKeys.Cancel)
 	case m.focus == focusPanel:
-		left = shortHelp(m.help, m.panelKeys.Field, m.panelKeys.Value,
+		left = shortHelp(h, m.panelKeys.Field, m.panelKeys.Value,
 			m.panelKeys.Edit, m.panelKeys.Cycle, m.panelKeys.Back)
 	case m.focus == focusNotes:
-		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
+		left = shortHelp(h, m.notesKeys.Line, m.notesKeys.Back)
 	case m.focus == focusAgents:
-		left = shortHelp(m.help, m.agentKeys.Move, m.agentKeys.Open,
+		left = shortHelp(h, m.agentKeys.Move, m.agentKeys.Open,
 			m.agentKeys.New, m.agentKeys.Close, m.agentKeys.Back)
 	default:
-		left = shortHelp(m.help, m.keys.Send, m.keys.Scroll, m.keys.Cycle,
-			m.keys.Spawn, m.keys.Switch, m.keys.Debug, m.keys.Bench, m.keys.Reset, m.keys.Quit)
+		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Debug,
+			m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
 	}
-	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
-	// подсказываем, чем вернуться.
-	if !m.follow {
-		left = stNote.Render("↑ отлистано, End — к последнему ответу") + "  " + left
-	}
+	left = prefix + left
 	if m.flash != "" {
 		left = stErr.Render(m.flash)
 	}
-	// Расход всего пула: сюда же попадают вызовы агентов сравнения по Ctrl+E.
-	sp := m.pool.Spent()
-	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
-		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
+	if avail > 0 && lipgloss.Width(left) > avail {
+		left = lipgloss.NewStyle().MaxWidth(avail).Render(left)
+	}
 	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
