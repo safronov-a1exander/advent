@@ -5,6 +5,8 @@
 default_provider: deepseek
 runs_dir: runs
 reports_dir: reports
+# Сохранённые разговоры агентов: по JSON-файлу на агента (день 7).
+sessions_dir: sessions
 
 providers:
   - name: deepseek

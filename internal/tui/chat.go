@@ -27,6 +27,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/agent"
+	"github.com/safronov-a1exander/advent/internal/llm"
 )
 
 // ---- сообщения ----
@@ -53,11 +54,20 @@ const defaultTitle = "Бюджет · ассистент по личным тр�
 
 // Options — то, что нужно экрану чата для работы.
 type Options struct {
-	// Pool — откуда брать агентов. Первый агент порождается из Settings.
+	// Pool — откуда брать агентов. Если в пуле уже есть восстановленные
+	// разговоры, открывается последний; иначе агент порождается из Settings.
 	Pool     *agent.Pool
 	Provider string
 	Settings *Settings
 	Title    string
+
+	// Resume — id разговора, который открыть при старте.
+	Resume string
+	// Fresh — начать новый разговор, даже если есть сохранённые.
+	Fresh bool
+	// Notice — строка в начало ленты: например, что часть разговоров
+	// не удалось прочитать.
+	Notice string
 }
 
 type focusTarget int
@@ -144,7 +154,10 @@ func NewModel(o Options) *Model {
 	}
 	m.pool = o.Pool
 	m.transcripts = map[string][]string{}
-	m.ag = m.spawn()
+	m.ag = m.pickStartAgent()
+	if o.Notice != "" {
+		m.lines = append([]string{stErr.Render(o.Notice), ""}, m.lines...)
+	}
 	m.panel = NewPanel(m.set.Fields(), 34)
 	m.notes = NewNotes(60, notesHeight)
 	return m
@@ -214,6 +227,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.busy.Store(false)
 		m.finish(msg.reply, msg.err)
+		if err := m.pool.SaveErr(); err != nil {
+			m.pushLine(stErr.Render(err.Error()))
+			m.refresh()
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -384,6 +401,56 @@ func (m *Model) resetConversation() {
 	m.pushLine("")
 	m.pushLine(stDim.Render("— контекст агента " + m.ag.ID() + " сброшен (счётчики расхода не обнуляются) —"))
 	m.refresh()
+}
+
+// pickStartAgent — с кем разговаривать при запуске. Сохранённые разговоры
+// уже подняты в пул; открываем тот, что просили, или последний по времени,
+// чтобы после перезапуска продолжить ровно с того места.
+func (m *Model) pickStartAgent() *agent.Agent {
+	var pick *agent.Agent
+	if id := m.opts.Resume; id != "" {
+		a, ok := m.pool.Get(id)
+		if !ok {
+			m.lines = append(m.lines, stErr.Render("разговор "+id+" не найден — начинаю новый"), "")
+		}
+		pick = a
+	} else if !m.opts.Fresh {
+		for _, a := range m.pool.List() {
+			if pick == nil || a.Updated().After(pick.Updated()) {
+				pick = a
+			}
+		}
+	}
+	if pick == nil {
+		return m.spawn()
+	}
+	m.set.LoadConfig(pick.Config())
+	m.lines = append(m.lines, m.replay(pick)...)
+	return pick
+}
+
+// replay рисует ленту восстановленного разговора из истории агента:
+// после перезапуска на экране должна быть та же переписка, что и до него.
+func (m *Model) replay(a *agent.Agent) []string {
+	hist := a.History()
+	model := a.Config().Model
+	var out []string
+	where := ""
+	if st := m.pool.Store(); st != nil {
+		where = " из " + st.Path(a.ID())
+	}
+	out = append(out, stDim.Render(fmt.Sprintf("— разговор %s восстановлен%s · сообщений %d · обновлён %s —",
+		a.ID(), where, len(hist), a.Updated().Format("02.01 15:04"))))
+	for _, msg := range hist {
+		out = append(out, "")
+		switch msg.Role {
+		case llm.RoleUser:
+			out = append(out, stUser.Render("вы:"), msg.Content)
+		default:
+			out = append(out, stBot.Render(model+":"), msg.Content)
+		}
+	}
+	return out
 }
 
 // spawn порождает агента из текущих настроек панели.
@@ -651,6 +718,26 @@ func (m *Model) frame(focused bool) lipgloss.Style {
 }
 
 func (m *Model) status() string {
+	// Расход всего пула: сюда же попадают вызовы агентов сравнения по Ctrl+E.
+	// Счётчики справа важнее подсказки слева, поэтому место под них
+	// резервируется первым, а подсказка ужимается под остаток.
+	sp := m.pool.Spent()
+	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
+		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
+	avail := m.w - lipgloss.Width(right) - 4
+
+	var prefix string
+	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
+	// подсказываем, чем вернуться.
+	if !m.follow {
+		prefix = stNote.Render("↑ отлистано, End — к последнему ответу") + "  "
+	}
+	// help.Model с заданной шириной сам отбрасывает привязки, которые
+	// не влезают, и ставит многоточие, — а не режет посреди слова.
+	h := m.help
+	// два символа запаса — под многоточие, которое help дописывает сам
+	h.SetWidth(avail - lipgloss.Width(prefix) - 2)
+
 	// Подсказка собирается из тех же привязок, по которым работают клавиши,
 	// поэтому не может разойтись с поведением (см. keys.go).
 	var left string
@@ -658,31 +745,26 @@ func (m *Model) status() string {
 	case m.busy.Load():
 		left = m.sp.View() + " ждём ответ…"
 	case m.panel.Editing():
-		left = shortHelp(m.help, m.editKeys.Apply, m.editKeys.Cancel)
+		left = shortHelp(h, m.editKeys.Apply, m.editKeys.Cancel)
 	case m.focus == focusPanel:
-		left = shortHelp(m.help, m.panelKeys.Field, m.panelKeys.Value,
+		left = shortHelp(h, m.panelKeys.Field, m.panelKeys.Value,
 			m.panelKeys.Edit, m.panelKeys.Cycle, m.panelKeys.Back)
 	case m.focus == focusNotes:
-		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
+		left = shortHelp(h, m.notesKeys.Line, m.notesKeys.Back)
 	case m.focus == focusAgents:
-		left = shortHelp(m.help, m.agentKeys.Move, m.agentKeys.Open,
+		left = shortHelp(h, m.agentKeys.Move, m.agentKeys.Open,
 			m.agentKeys.New, m.agentKeys.Close, m.agentKeys.Back)
 	default:
-		left = shortHelp(m.help, m.keys.Send, m.keys.Scroll, m.keys.Cycle,
-			m.keys.Spawn, m.keys.Switch, m.keys.Debug, m.keys.Bench, m.keys.Reset, m.keys.Quit)
+		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Debug,
+			m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
 	}
-	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
-	// подсказываем, чем вернуться.
-	if !m.follow {
-		left = stNote.Render("↑ отлистано, End — к последнему ответу") + "  " + left
-	}
+	left = prefix + left
 	if m.flash != "" {
 		left = stErr.Render(m.flash)
 	}
-	// Расход всего пула: сюда же попадают вызовы агентов сравнения по Ctrl+E.
-	sp := m.pool.Spent()
-	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
-		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
+	if avail > 0 && lipgloss.Width(left) > avail {
+		left = lipgloss.NewStyle().MaxWidth(avail).Render(left)
+	}
 	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1

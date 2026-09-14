@@ -27,6 +27,8 @@ type Config struct {
 	Providers       []Provider `yaml:"providers"`
 	RunsDir         string     `yaml:"runs_dir"`
 	ReportsDir      string     `yaml:"reports_dir"`
+	// SessionsDir — где лежат сохранённые разговоры агентов (день 7).
+	SessionsDir string `yaml:"sessions_dir"`
 }
 
 var ErrNoKey = errors.New("не найден API-ключ")
@@ -57,6 +59,9 @@ func Load(dir string) (*Config, error) {
 	if cfg.ReportsDir == "" {
 		cfg.ReportsDir = filepath.Join(dir, "reports")
 	}
+	if cfg.SessionsDir == "" {
+		cfg.SessionsDir = filepath.Join(dir, "sessions")
+	}
 	return cfg, nil
 }
 
@@ -77,6 +82,9 @@ func (c *Config) merge(o *Config) {
 	}
 	if o.ReportsDir != "" {
 		c.ReportsDir = o.ReportsDir
+	}
+	if o.SessionsDir != "" {
+		c.SessionsDir = o.SessionsDir
 	}
 	for _, op := range o.Providers {
 		found := false

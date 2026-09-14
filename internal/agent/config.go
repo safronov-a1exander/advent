@@ -17,24 +17,24 @@ import (
 // из YAML, скопировать, поменять одно поле и отдать новому агенту.
 type Config struct {
 	// Name — человеческое имя; по нему агенты группируются в отчётах пула.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name,omitempty"`
 
 	// Model — точный id модели. Если пусто, берётся модель класса Tier —
 	// так конфиг не привязан к именам моделей конкретного провайдера.
-	Model string `yaml:"model"`
-	Tier  string `yaml:"tier"` // weak | medium | strong
+	Model string `yaml:"model" json:"model,omitempty"`
+	Tier  string `yaml:"tier" json:"tier,omitempty"` // weak | medium | strong
 
-	System   string `yaml:"system"`
-	Strategy string `yaml:"strategy"`
-	Stream   bool   `yaml:"stream"`
+	System   string `yaml:"system" json:"system,omitempty"`
+	Strategy string `yaml:"strategy" json:"strategy,omitempty"`
+	Stream   bool   `yaml:"stream" json:"stream"`
 
-	Temperature    *float64 `yaml:"temperature"`
-	TopP           *float64 `yaml:"top_p"`
-	Thinking       string   `yaml:"thinking"`
-	Seed           *int     `yaml:"seed"`
-	MaxTokens      *int     `yaml:"max_tokens"`
-	Stop           []string `yaml:"stop"`
-	ResponseFormat string   `yaml:"response_format"`
+	Temperature    *float64 `yaml:"temperature" json:"temperature,omitempty"`
+	TopP           *float64 `yaml:"top_p" json:"top_p,omitempty"`
+	Thinking       string   `yaml:"thinking" json:"thinking,omitempty"`
+	Seed           *int     `yaml:"seed" json:"seed,omitempty"`
+	MaxTokens      *int     `yaml:"max_tokens" json:"max_tokens,omitempty"`
+	Stop           []string `yaml:"stop" json:"stop,omitempty"`
+	ResponseFormat string   `yaml:"response_format" json:"response_format,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,

@@ -38,6 +38,7 @@ func usage() {
   run       прогон YAML-сценария в консоль + markdown-отчёт (день 2)
   lab       то же в TUI: варианты рядом, проверки, сводка   (день 2)
   swarm     флот агентов из YAML в одном процессе, один вопрос всем (день 6)
+  sessions  сохранённые разговоры агентов                   (день 7)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -72,6 +73,8 @@ func run() error {
 		return cmdLab(ctx, args)
 	case "swarm":
 		return cmdSwarm(ctx, args)
+	case "sessions":
+		return cmdSessions(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

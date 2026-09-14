@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -92,6 +93,10 @@ func (m *Model) activate(a *agent.Agent) {
 	m.transcripts[m.ag.ID()] = m.lines
 	m.ag = a
 	m.lines = m.transcripts[a.ID()]
+	if m.lines == nil && len(a.History()) > 0 {
+		// восстановленный после перезапуска разговор ещё ни разу не открывали
+		m.lines = m.replay(a)
+	}
 	m.set.LoadConfig(a.Config())
 	m.panel.Changed = false
 	m.follow = true
@@ -134,7 +139,9 @@ func (m *Model) closeAgent(a *agent.Agent) {
 			}
 		}
 	}
-	m.pool.Remove(a.ID())
+	if err := m.pool.Remove(a.ID()); err != nil {
+		m.flash = "агент закрыт, но файл разговора не перенесён в архив: " + err.Error()
+	}
 	delete(m.transcripts, a.ID())
 	if m.agentSel >= m.pool.Len() {
 		m.agentSel = m.pool.Len() - 1
@@ -172,10 +179,20 @@ func (m *Model) agentsView(width int) string {
 		}
 		cfg := a.Config()
 		b.WriteString(stDim.Render("    "+short(title, width-4)) + "\n")
-		b.WriteString(stDim.Render("    "+short(fmt.Sprintf("%s · сообщений %d", cfg.Model, len(a.History())), width-4)) + "\n")
+		b.WriteString(stDim.Render("    "+short(fmt.Sprintf("%s · сообщений %d · %s",
+			cfg.Model, len(a.History()), when(a.Updated())), width-4)) + "\n")
 		if i < m.pool.Len()-1 {
 			b.WriteString("\n")
 		}
 	}
 	return b.String()
+}
+
+// when — время изменения коротко: сегодняшнее без даты.
+func when(t time.Time) string {
+	now := time.Now()
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		return t.Format("15:04")
+	}
+	return t.Format("02.01 15:04")
 }

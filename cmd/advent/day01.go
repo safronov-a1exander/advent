@@ -36,6 +36,9 @@ type askFlags struct {
 	stream      bool
 	raw         bool
 	runID       string
+
+	// cfg — загруженный config.yaml; заполняется в setup.
+	cfg *config.Config
 }
 
 func bindAsk(fs *flag.FlagSet) *askFlags {
@@ -59,6 +62,7 @@ func (a *askFlags) setup() (*llm.Client, *config.Provider, *store.Writer, llm.Re
 	if err != nil {
 		return nil, nil, nil, llm.Request{}, err
 	}
+	a.cfg = cfg
 	model := a.model
 	if model == "" {
 		model = prov.DefaultMod
@@ -154,15 +158,17 @@ func cmdAsk(ctx context.Context, args []string) error {
 func cmdChat(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
 	a := bindAsk(fs)
+	sf := bindSessions(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runTUI(ctx, a, nil, "")
+	return runTUI(ctx, a, sf, nil, "")
 }
 
 func cmdDemo(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
 	a := bindAsk(fs)
+	sf := bindSessions(fs)
 	script := fs.String("script", "", "файл сценария (.demo)")
 	title := fs.String("title", "", "заголовок экрана")
 	if err := fs.Parse(args); err != nil {
@@ -175,10 +181,10 @@ func cmdDemo(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runTUI(ctx, a, acts, *title)
+	return runTUI(ctx, a, sf, acts, *title)
 }
 
-func runTUI(ctx context.Context, a *askFlags, acts []tui.Action, title string) error {
+func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Action, title string) error {
 	client, prov, w, req, err := a.setup()
 	if err != nil {
 		return err
@@ -191,12 +197,24 @@ func runTUI(ctx context.Context, a *askFlags, acts []tui.Action, title string) e
 
 	// Экран не ходит в API сам: он говорит с агентами из пула, а пул
 	// пишет каждый вызов в тот же журнал runs/*.jsonl.
-	m := tui.NewModel(tui.Options{
-		Pool:     agent.NewPool(client, prov.Name, w),
+	pool := agent.NewPool(client, prov.Name, w)
+	opts := tui.Options{
+		Pool:     pool,
 		Provider: prov.Name,
 		Settings: set,
 		Title:    title,
-	})
+		Resume:   sf.resume,
+		Fresh:    sf.fresh,
+	}
+	// День 7: разговоры переживают перезапуск. Пул сохраняет агентов
+	// в каталог сессий и при старте поднимает всех обратно.
+	if !sf.noSave {
+		pool.SetStore(agent.NewFileStore(sf.dir(a.cfg)))
+		if _, err := pool.Restore(); err != nil {
+			opts.Notice = "часть сохранённых разговоров не прочиталась: " + err.Error()
+		}
+	}
+	m := tui.NewModel(opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
 
 	if len(acts) > 0 {
