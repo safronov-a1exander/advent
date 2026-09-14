@@ -37,6 +37,7 @@ func usage() {
   demo      прогон сценария в TUI — для записи видео       (день 1)
   run       прогон YAML-сценария в консоль + markdown-отчёт (день 2)
   lab       то же в TUI: варианты рядом, проверки, сводка   (день 2)
+  swarm     флот агентов из YAML в одном процессе, один вопрос всем (день 6)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -69,6 +70,8 @@ func run() error {
 		return cmdRun(ctx, args)
 	case "lab":
 		return cmdLab(ctx, args)
+	case "swarm":
+		return cmdSwarm(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

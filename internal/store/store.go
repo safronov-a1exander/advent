@@ -16,8 +16,10 @@ import (
 
 // Record — одна строка журнала: что отправили, что получили, сколько стоило.
 type Record struct {
-	TS        time.Time     `json:"ts"`
-	RunID     string        `json:"run_id"`
+	TS    time.Time `json:"ts"`
+	RunID string    `json:"run_id"`
+	// Agent — id агента, сделавшего вызов. Пусто у сценариев и разовых запросов.
+	Agent     string        `json:"agent,omitempty"`
 	Scenario  string        `json:"scenario,omitempty"`
 	Variant   string        `json:"variant,omitempty"`
 	Step      int           `json:"step,omitempty"`

@@ -8,18 +8,22 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
-	"github.com/safronov-a1exander/advent/internal/store"
 )
 
 // Сравнение моделей прямо из чата (задание дня 5).
 //
-// По Ctrl+E последний заданный вопрос уходит на все модели из config.yaml
-// по очереди, и рядом печатается таблица: задержка, скорость генерации,
-// токены, цена. То есть «сравнить слабую, среднюю и сильную» делается
-// без единого YAML-сценария.
+// По Ctrl+E последний заданный вопрос уходит на все модели из config.yaml,
+// и рядом печатается таблица: задержка, скорость генерации, токены, цена.
+// То есть «сравнить слабую, среднюю и сильную» делается без YAML-сценария.
+//
+// С шестого дня это пачка агентов: на каждую модель пул порождает агента
+// с копией текущего конфига и пустой историей, все отвечают параллельно,
+// потом агенты убираются. Отдельной логики запроса здесь больше нет.
 
 type benchRow struct {
+	Agent   string
 	Model   string
 	Tier    string
 	Latency time.Duration
@@ -45,13 +49,25 @@ func (m *Model) startBench() tea.Cmd {
 		return nil
 	}
 
-	tmpl := m.buildRequest("")
-	tmpl.Messages = nil
-	sys := strings.TrimSpace(m.set.System)
+	// Сравниваем модели, а не разговоры: у агентов сравнения пустая история
+	// и прямой ответ без цепочки, иначе разница в таблице была бы не про модель.
+	base := m.set.AgentConfig()
+	base.Strategy = agent.StrategyDirect
+	base.Stream = false
+	agents := make([]*agent.Agent, 0, len(models))
+	tiers := map[string]string{}
+	for _, mi := range models {
+		cfg := base.Clone()
+		cfg.Name = "bench"
+		cfg.Model = mi.ID
+		a := m.pool.Spawn(cfg)
+		agents = append(agents, a)
+		tiers[a.ID()] = mi.Tier
+	}
 	question := m.lastQuestion
 
 	m.pushLine("")
-	m.pushLine(stBot.Render(fmt.Sprintf("▸ сравнение моделей (%d шт.) на одном вопросе", len(models))))
+	m.pushLine(stBot.Render(fmt.Sprintf("▸ сравнение моделей: %d агента(ов) из пула отвечают параллельно", len(agents))))
 	m.pushLine(stDim.Render(shorten(question, 200)))
 	m.busy.Store(true)
 
@@ -59,52 +75,26 @@ func (m *Model) startBench() tea.Cmd {
 	m.cancel = cancel
 	ch := make(chan tea.Msg, 64)
 	m.stream = ch
-	client := m.opts.Client
-	journal := m.opts.Store
-	provider := m.opts.Provider
+	pool := m.pool
 
 	go func() {
 		defer cancel()
-		var rows []benchRow
-		for _, mi := range models {
-			req := tmpl
-			req.Model = mi.ID
-			var msgs []llm.Message
-			if sys != "" {
-				msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: sys})
+		row := func(r agent.Result) benchRow {
+			cfg := r.Agent.Config()
+			out := benchRow{Agent: r.Agent.ID(), Model: cfg.Model, Tier: tiers[r.Agent.ID()]}
+			if r.Err != nil {
+				out.Err = r.Err.Error()
+				return out
 			}
-			msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: question})
-			req.Messages = msgs
-
-			row := benchRow{Model: mi.ID, Tier: mi.Tier}
-			resp, err := client.Chat(ctx, req)
-
-			rec := store.Record{
-				Scenario: "chat-bench", Variant: mi.ID,
-				Provider: provider, Model: mi.ID,
-				Params: store.ParamsOf(req), Messages: msgs,
-			}
-			if err != nil {
-				row.Err = err.Error()
-				rec.Error = err.Error()
-			} else {
-				row.Latency = resp.Latency
-				row.Usage = resp.Usage
-				row.Cost = resp.CostUSD
-				row.Answer = resp.Content
-
-				rec.Content = resp.Content
-				rec.Reasoning = resp.Reasoning
-				rec.Finish = resp.FinishReason
-				rec.Usage = resp.Usage
-				rec.LatencyMS = resp.Latency.Milliseconds()
-				rec.CostUSD = resp.CostUSD
-			}
-			if journal != nil {
-				_ = journal.Append(rec)
-			}
-			rows = append(rows, row)
-			ch <- benchStepMsg(row)
+			resp := r.Reply.Final
+			out.Latency, out.Usage, out.Cost, out.Answer = resp.Latency, resp.Usage, resp.CostUSD, resp.Content
+			return out
+		}
+		results := pool.AskAll(ctx, agents, question, 0, func(r agent.Result) { ch <- benchStepMsg(row(r)) })
+		rows := make([]benchRow, 0, len(results))
+		for _, r := range results {
+			rows = append(rows, row(r))
+			pool.Remove(r.Agent.ID())
 		}
 		ch <- benchDoneMsg{rows: rows}
 	}()

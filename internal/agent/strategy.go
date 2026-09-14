@@ -1,10 +1,10 @@
-package tui
+package agent
 
 import "strings"
 
-// Стратегии рассуждения, добавленные на шаге 3. Выбираются в панели и применяются
-// к обычному вопросу в чате — то есть сравнить способы можно вручную,
-// не описывая YAML-сценарий.
+// Стратегии рассуждения, добавленные на шаге 3. Это часть поведения агента,
+// а не экрана: одна и та же стратегия работает и в чате, и в пуле агентов,
+// поэтому она живёт здесь и выбирается полем Config.Strategy.
 const (
 	StrategyDirect  = ""
 	StrategyCoT     = "пошагово"
@@ -32,10 +32,10 @@ type ChainStep struct {
 	Final bool
 }
 
-// Chain разворачивает выбранную стратегию в цепочку вызовов.
+// Chain разворачивает стратегию в цепочку вызовов.
 // Для прямого ответа это один шаг, для экспертов — четыре.
-func (s *Settings) Chain(task string) []ChainStep {
-	switch s.Strategy {
+func Chain(strategy string) []ChainStep {
+	switch strategy {
 	case StrategyCoT:
 		return []ChainStep{{
 			Label: "пошаговое решение",
@@ -131,7 +131,8 @@ func StrategyHint(name string) string {
 	}
 }
 
-func strategyLabel(name string) string {
+// StrategyLabel — имя стратегии для показа; пустая строка — прямой ответ.
+func StrategyLabel(name string) string {
 	if strings.TrimSpace(name) == "" {
 		return "прямой ответ"
 	}

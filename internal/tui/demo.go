@@ -88,6 +88,7 @@ var keyMap = map[string]tea.KeyPressMsg{
 	"end":       {Code: tea.KeyEnd},
 	"delete":    {Code: tea.KeyDelete},
 	"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
+	"ctrl+d":    {Code: 'd', Mod: tea.ModCtrl},
 	"ctrl+e":    {Code: 'e', Mod: tea.ModCtrl},
 	"ctrl+j":    {Code: 'j', Mod: tea.ModCtrl},
 	"ctrl+l":    {Code: 'l', Mod: tea.ModCtrl},
@@ -96,6 +97,7 @@ var keyMap = map[string]tea.KeyPressMsg{
 	"ctrl+p":    {Code: 'p', Mod: tea.ModCtrl},
 	"ctrl+r":    {Code: 'r', Mod: tea.ModCtrl},
 	"ctrl+t":    {Code: 't', Mod: tea.ModCtrl},
+	"ctrl+w":    {Code: 'w', Mod: tea.ModCtrl},
 }
 
 // typeKey — сообщение о нажатии печатного символа.

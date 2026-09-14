@@ -3,6 +3,12 @@
 // День 1: слева поток диалога, справа панель параметров запроса,
 // снизу ввод и строка состояния с задержкой, токенами и стоимостью.
 // Все параметры правятся не перезапуском с флагами, а прямо на экране.
+//
+// День 6: экран больше не разговаривает с моделью сам. Историю, сборку
+// запроса и вызов API держит агент (пакет agent), а экран только показывает
+// его ответы и правит его конфиг. Агентов в пуле может быть сколько угодно:
+// Ctrl+N заводит нового, Ctrl+O открывает список разговоров, Ctrl+D
+// показывает, что внутри текущего агента.
 package tui
 
 import (
@@ -20,30 +26,18 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/safronov-a1exander/advent/internal/llm"
-	"github.com/safronov-a1exander/advent/internal/store"
+	"github.com/safronov-a1exander/advent/internal/agent"
 )
 
 // ---- сообщения ----
 
-type chunkMsg llm.Chunk
+// eventMsg — событие агента по ходу ответа: шаг цепочки или кусок текста.
+type eventMsg agent.Event
+
+// doneMsg — агент закончил отвечать.
 type doneMsg struct {
-	resp *llm.Response
-	err  error
-}
-
-// stepStartMsg — заголовок финального шага цепочки: он приходит потоком,
-// поэтому подписать его надо до первого чанка.
-type stepStartMsg string
-
-// stepMsg — результат промежуточного шага цепочки (стратегии дня 3).
-// Финальный шаг приходит обычным потоком и doneMsg.
-type stepMsg struct {
-	label   string
-	content string
-	usage   llm.Usage
-	cost    float64
-	latency time.Duration
+	reply *agent.Reply
+	err   error
 }
 
 // NoteMsg — строка для блокнота под окном диалога. Демо-сценарий шлёт её
@@ -59,17 +53,11 @@ const defaultTitle = "Бюджет · ассистент по личным тр�
 
 // Options — то, что нужно экрану чата для работы.
 type Options struct {
-	Client   *llm.Client
+	// Pool — откуда брать агентов. Первый агент порождается из Settings.
+	Pool     *agent.Pool
 	Provider string
 	Settings *Settings
-	Store    *store.Writer
 	Title    string
-}
-
-type totals struct {
-	prompt, completion, reasoning int
-	cost                          float64
-	calls                         int
 }
 
 type focusTarget int
@@ -78,6 +66,7 @@ const (
 	focusInput focusTarget = iota
 	focusPanel
 	focusNotes
+	focusAgents // список агентов на месте панели параметров
 )
 
 // notesHeight — сколько строк блокнота видно одновременно.
@@ -98,6 +87,7 @@ type Model struct {
 	panelKeys panelKeys
 	editKeys  editKeys
 	notesKeys notesKeys
+	agentKeys agentKeys
 	ready     bool
 	w, h      int
 	focus     focusTarget
@@ -106,19 +96,25 @@ type Model struct {
 	// когда читатель отлистал вверх, и возвращается на низу.
 	follow bool
 
-	// history хранит только реплики user/assistant. Системный промпт
-	// подставляется из настроек в момент отправки — поэтому его правка
-	// в панели действует сразу, а не после сброса контекста.
-	history []llm.Message
+	// pool и ag — с кем разговариваем. Экран не хранит историю: она у агента.
+	// Панель правит конфиг, и перед каждым вопросом он уходит в агента,
+	// поэтому правка системного промпта действует сразу.
+	pool *agent.Pool
+	ag   *agent.Agent
+	// transcripts — ленты неактивных агентов. Лента текущего живёт в lines;
+	// при переключении она откладывается сюда, а на экран встаёт чужая.
+	transcripts map[string][]string
+	agentSel    int
+	// flash — короткое пояснение в строке состояния до следующей клавиши:
+	// почему нажатие ничего не сделало.
+	flash string
+
 	lines   []string
 	partial strings.Builder
 
-	busy    atomic.Bool
-	stream  chan tea.Msg
-	cancel  context.CancelFunc
-	lastErr error
-	last    *llm.Response
-	tot     totals
+	busy   atomic.Bool
+	stream chan tea.Msg
+	cancel context.CancelFunc
 	// lastQuestion — последний заданный вопрос; по Ctrl+E он уходит
 	// на все модели сразу (задание дня 5).
 	lastQuestion string
@@ -144,7 +140,11 @@ func NewModel(o Options) *Model {
 		panelKeys: newPanelKeys("в диалог"),
 		editKeys:  newEditKeys(),
 		notesKeys: newNotesKeys("вернуться в диалог"),
+		agentKeys: newAgentKeys(),
 	}
+	m.pool = o.Pool
+	m.transcripts = map[string][]string{}
+	m.ag = m.spawn()
 	m.panel = NewPanel(m.set.Fields(), 34)
 	m.notes = NewNotes(60, notesHeight)
 	return m
@@ -193,11 +193,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					row.Latency.Round(time.Millisecond),
 					row.Usage.PromptTokens, row.Usage.CompletionTokens, row.Cost)))
 			m.pushLine(stDim.Render("  " + shorten(row.Answer, 300)))
-			m.tot.calls++
-			m.tot.prompt += row.Usage.PromptTokens
-			m.tot.completion += row.Usage.CompletionTokens
-			m.tot.reasoning += row.Usage.ReasoningTokens
-			m.tot.cost += row.Cost
 		}
 		m.refresh()
 		return m, m.waitChunk()
@@ -212,36 +207,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
-	case stepStartMsg:
-		m.pushLine(stBot.Render("▸ " + string(msg)))
-		m.refresh()
-		return m, m.waitChunk()
-
-	case stepMsg:
-		m.pushLine(stBot.Render("▸ " + msg.label))
-		m.pushLine(stDim.Render(shorten(msg.content, 600)))
-		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ %s · in %d / out %d · $%.6f",
-			msg.latency.Round(time.Millisecond),
-			msg.usage.PromptTokens, msg.usage.CompletionTokens, msg.cost)))
-		m.pushLine("")
-		m.tot.calls++
-		m.tot.prompt += msg.usage.PromptTokens
-		m.tot.completion += msg.usage.CompletionTokens
-		m.tot.reasoning += msg.usage.ReasoningTokens
-		m.tot.cost += msg.cost
-		m.refresh()
-		return m, m.waitChunk()
-
-	case chunkMsg:
-		if msg.Content != "" {
-			m.partial.WriteString(msg.Content)
-			m.refresh()
-		}
+	case eventMsg:
+		m.onEvent(agent.Event(msg))
 		return m, m.waitChunk()
 
 	case doneMsg:
 		m.busy.Store(false)
-		m.finish(msg.resp, msg.err)
+		m.finish(msg.reply, msg.err)
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -268,6 +240,14 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cancel()
 		}
 		return m, tea.Quit
+	}
+
+	m.flash = ""
+	if m.focus == focusAgents {
+		if cmd, handled := m.agentsKey(msg); handled {
+			return m, cmd
+		}
+		return m, nil
 	}
 
 	if m.focus == focusPanel {
@@ -332,6 +312,26 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.resetConversation()
 		return m, nil
 
+	case "ctrl+d":
+		m.dumpAgent()
+		return m, nil
+
+	case "ctrl+n":
+		if m.busy.Load() {
+			m.flash = "дождись ответа, потом заводи нового агента"
+			return m, nil
+		}
+		m.newAgent()
+		if m.focus != focusInput {
+			m.focus = focusInput
+			m.layout()
+			return m, m.ta.Focus()
+		}
+		return m, nil
+
+	case "ctrl+o":
+		return m, m.openAgents()
+
 	case "ctrl+e":
 		if m.busy.Load() {
 			return m, nil
@@ -380,131 +380,105 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) resetConversation() {
-	m.history = nil
-	m.last = nil
+	m.ag.Reset()
 	m.pushLine("")
-	m.pushLine(stDim.Render("— контекст сброшен (счётчики расхода за сессию не обнуляются) —"))
+	m.pushLine(stDim.Render("— контекст агента " + m.ag.ID() + " сброшен (счётчики расхода не обнуляются) —"))
 	m.refresh()
 }
 
-// buildRequest собирает запрос из текущих настроек панели.
-func (m *Model) buildRequest(userText string) llm.Request {
-	msgs := make([]llm.Message, 0, len(m.history)+2)
-	if s := strings.TrimSpace(m.set.System); s != "" {
-		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: s})
+// spawn порождает агента из текущих настроек панели.
+func (m *Model) spawn() *agent.Agent {
+	cfg := m.set.AgentConfig()
+	cfg.Name = "бюджет"
+	return m.pool.Spawn(cfg)
+}
+
+// dumpAgent — Ctrl+D: что внутри агента и что именно уйдёт в API
+// следующим запросом. Для видео это и есть «дебаг-данные» шестого дня.
+func (m *Model) dumpAgent() {
+	m.ag.SetConfig(m.set.AgentConfig())
+	cfg := m.ag.Config()
+	st := m.ag.Stats()
+	stack := m.ag.Messages("<следующий вопрос>")
+
+	m.pushLine("")
+	m.pushLine(stBot.Render("▸ агент " + m.ag.ID()))
+	sum := cfg.Summary()
+	if sum == "" {
+		sum = "параметры по умолчанию"
 	}
-	msgs = append(msgs, m.history...)
-	if userText != "" {
-		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: userText})
+	m.pushLine(stDim.Render(fmt.Sprintf("  конфиг   модель %s · %s", cfg.Model, sum)))
+	m.pushLine(stDim.Render(fmt.Sprintf("  расход   ходов %d · вызовов %d · ошибок %d · in %d (кэш %d) · out %d · reasoning %d · $%.6f",
+		st.Turns, st.Calls, st.Errors, st.Prompt, st.Cached, st.Completion, st.Reasoning, st.CostUSD)))
+	m.pushLine(stDim.Render(fmt.Sprintf("  стек     %d сообщений уйдёт в API со следующим вопросом:", len(stack))))
+	for i, msg := range stack {
+		m.pushLine(stDim.Render(fmt.Sprintf("    %2d %-9s %5d симв.  %s",
+			i+1, msg.Role, len([]rune(msg.Content)), shorten(oneLine(msg.Content), 70))))
 	}
-	req := llm.Request{Messages: msgs}
-	m.set.Apply(&req)
-	return req
+	others := m.pool.Len() - 1
+	if others > 0 {
+		m.pushLine(stDim.Render(fmt.Sprintf("  в пуле ещё агентов: %d — у каждого свой конфиг и своя история", others)))
+	}
+	m.refresh()
 }
 
 func (m *Model) send(text string) tea.Cmd {
-	// Всё, что читает горутина, снимаем здесь: панель живёт в главном
-	// цикле и может поменять настройки, пока запрос в полёте.
-	tmpl := m.buildRequest("")
-	tmpl.Messages = nil
-	sys := strings.TrimSpace(m.set.System)
-	hist := append([]llm.Message(nil), m.history...)
-	chain := m.set.Chain(text)
-	streaming := m.set.Stream
-
-	m.history = append(m.history, llm.Message{Role: llm.RoleUser, Content: text})
+	// Панель живёт в главном цикле и может поменяться, пока агент отвечает,
+	// поэтому конфиг отдаём агенту до старта, а подпись снимаем здесь же.
+	cfg := m.set.AgentConfig()
+	m.ag.SetConfig(cfg)
+	ag := m.ag
 	m.lastQuestion = text
 
 	m.pushLine("")
 	m.pushLine(stUser.Render("вы:"))
 	m.pushLine(text)
 	m.pushLine("")
-	head := stBot.Render(m.set.Model + ":")
-	if sum := m.set.Summary(); sum != "" {
+	head := stBot.Render(cfg.Model + ":")
+	if m.pool.Len() > 1 {
+		head = stBot.Render(ag.ID()+" · "+cfg.Model) + stBot.Render(":")
+	}
+	if sum := cfg.Summary(); sum != "" {
 		head += " " + stDim.Render(sum)
 	}
-	if len(chain) > 1 {
-		head += " " + stDim.Render(fmt.Sprintf("· %d вызова(ов)", len(chain)))
+	if n := len(agent.Chain(cfg.Strategy)); n > 1 {
+		head += " " + stDim.Render(fmt.Sprintf("· %d вызова(ов)", n))
 	}
 	m.pushLine(head)
 	m.partial.Reset()
 	m.busy.Store(true)
-	m.lastErr = nil
 	m.panel.Changed = false
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	m.cancel = cancel
 	ch := make(chan tea.Msg, 256)
 	m.stream = ch
-	client := m.opts.Client
 
 	go func() {
 		defer cancel()
-		prev := map[string]string{}
-
-		for _, st := range chain {
-			req := tmpl
-			prompt := st.Build(text, prev)
-
-			stepSys := sys
-			if st.System != "" {
-				stepSys = st.System
-			}
-			var msgs []llm.Message
-			if stepSys != "" {
-				msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: stepSys})
-			}
-			// История диалога подмешивается только в финальный шаг:
-			// промежуточные — самостоятельные вызовы.
-			if st.Final {
-				msgs = append(msgs, hist...)
-			}
-			msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: prompt})
-			req.Messages = msgs
-
-			if !st.Final {
-				resp, err := client.Chat(ctx, req)
-				if err != nil {
-					ch <- doneMsg{err: err}
-					return
-				}
-				if st.Capture != "" {
-					prev[st.Capture] = resp.Content
-				}
-				ch <- stepMsg{
-					label: st.Label, content: resp.Content,
-					usage: resp.Usage, cost: resp.CostUSD, latency: resp.Latency,
-				}
-				continue
-			}
-
-			if len(chain) > 1 {
-				ch <- stepStartMsg(st.Label)
-			}
-			var (
-				resp *llm.Response
-				err  error
-			)
-			if streaming {
-				resp, err = client.ChatStream(ctx, req, func(c llm.Chunk) error {
-					if !c.Done {
-						ch <- chunkMsg(c)
-					}
-					return nil
-				})
-			} else {
-				resp, err = client.Chat(ctx, req)
-				if err == nil {
-					ch <- chunkMsg(llm.Chunk{Content: resp.Content})
-				}
-			}
-			ch <- doneMsg{resp: resp, err: err}
-			return
-		}
+		reply, err := ag.Ask(ctx, text, func(e agent.Event) { ch <- eventMsg(e) })
+		ch <- doneMsg{reply: reply, err: err}
 	}()
 
 	m.refresh()
 	return tea.Batch(m.waitChunk(), m.sp.Tick)
+}
+
+// onEvent показывает то, что агент сообщает по ходу ответа.
+func (m *Model) onEvent(e agent.Event) {
+	switch e.Kind {
+	case agent.EventStep:
+		m.pushLine(stBot.Render("▸ " + e.Label))
+		m.pushLine(stDim.Render(shorten(e.Content, 600)))
+		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ %s · in %d / out %d · $%.6f",
+			e.Latency.Round(time.Millisecond), e.Usage.PromptTokens, e.Usage.CompletionTokens, e.CostUSD)))
+		m.pushLine("")
+	case agent.EventFinalStart:
+		m.pushLine(stBot.Render("▸ " + e.Label))
+	case agent.EventChunk:
+		m.partial.WriteString(e.Content)
+	}
+	m.refresh()
 }
 
 func (m *Model) waitChunk() tea.Cmd {
@@ -512,62 +486,28 @@ func (m *Model) waitChunk() tea.Cmd {
 	return func() tea.Msg { return <-ch }
 }
 
-func (m *Model) finish(resp *llm.Response, err error) {
+func (m *Model) finish(reply *agent.Reply, err error) {
 	body := m.partial.String()
 	m.partial.Reset()
 
 	if err != nil {
-		m.lastErr = err
-		m.pushLine(stErr.Render("ошибка: " + err.Error()))
-		if n := len(m.history); n > 0 {
-			m.history = m.history[:n-1] // откатываем неотвеченную реплику
+		if body != "" {
+			m.pushLine(body)
 		}
+		m.pushLine(stErr.Render("ошибка: " + err.Error()))
+		m.pushLine(stDim.Render("  вопрос в историю агента не попал — его можно задать заново"))
 		m.refresh()
-		m.log(nil, err)
 		return
 	}
 
+	resp := reply.Final
 	m.pushLine(body)
-	m.history = append(m.history, llm.Message{Role: llm.RoleAssistant, Content: resp.Content})
-	m.last = resp
-	m.tot.calls++
-	m.tot.prompt += resp.Usage.PromptTokens
-	m.tot.completion += resp.Usage.CompletionTokens
-	m.tot.reasoning += resp.Usage.ReasoningTokens
-	m.tot.cost += resp.CostUSD
-
 	m.pushLine(stDim.Render(fmt.Sprintf(
 		"  ↳ finish_reason=%s  latency=%s  prompt=%d  completion=%d  reasoning=%d  $%.6f",
 		resp.FinishReason, resp.Latency.Round(time.Millisecond),
 		resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
 		resp.Usage.ReasoningTokens, resp.CostUSD)))
 	m.refresh()
-	m.log(resp, nil)
-}
-
-func (m *Model) log(resp *llm.Response, err error) {
-	if m.opts.Store == nil {
-		return
-	}
-	req := m.buildRequest("")
-	rec := store.Record{
-		Provider: m.opts.Provider,
-		Model:    req.Model,
-		Params:   store.ParamsOf(req),
-		Messages: req.Messages,
-	}
-	if err != nil {
-		rec.Error = err.Error()
-	}
-	if resp != nil {
-		rec.Content = resp.Content
-		rec.Reasoning = resp.Reasoning
-		rec.Finish = resp.FinishReason
-		rec.Usage = resp.Usage
-		rec.LatencyMS = resp.Latency.Milliseconds()
-		rec.CostUSD = resp.CostUSD
-	}
-	_ = m.opts.Store.Append(rec)
 }
 
 // ---- отрисовка ----
@@ -575,7 +515,7 @@ func (m *Model) log(resp *llm.Response, err error) {
 func (m *Model) pushLine(s string) { m.lines = append(m.lines, s) }
 
 func (m *Model) panelW() int {
-	if !m.showPanel {
+	if !m.showPanel && m.focus != focusAgents {
 		return 0
 	}
 	w := m.w / 3
@@ -643,7 +583,11 @@ func (m *Model) refresh() {
 		w = 20
 	}
 	m.vp.SetContent(lipgloss.NewStyle().Width(w).Render(body))
-	m.vp.GotoBottom()
+	// К низу только если читатель там и был: отлистал вверх посреди ответа —
+	// очередной кусок текста не должен дёргать экран обратно.
+	if m.follow {
+		m.vp.GotoBottom()
+	}
 }
 
 func (m *Model) View() tea.View {
@@ -658,14 +602,20 @@ func (m *Model) View() tea.View {
 	}
 	header := stTitle.Render(title) + "  " +
 		stDim.Render(fmt.Sprintf("%s / %s", m.opts.Provider, m.set.Model))
+	if n := m.pool.Len(); n > 1 {
+		header += "  " + stNote.Render(fmt.Sprintf("агент %s · в пуле %d", m.ag.ID(), n))
+	}
 
 	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width() + 2).Render(m.vp.View())
 	body := transcript
 	if pw := m.panelW(); pw > 0 {
 		// Рамка панели по высоте содержимого, а не во весь экран: параметров
 		// немного, и высокий пустой прямоугольник справа смотрится как брак.
-		panel := m.frame(m.focus == focusPanel).Width(pw).
-			Render(m.panel.View(m.focus == focusPanel))
+		side := m.panel.View(m.focus == focusPanel)
+		if m.focus == focusAgents {
+			side = m.agentsView(pw - 2)
+		}
+		panel := m.frame(m.focus == focusPanel || m.focus == focusAgents).Width(pw).Render(side)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, transcript, panel)
 	}
 
@@ -714,17 +664,25 @@ func (m *Model) status() string {
 			m.panelKeys.Edit, m.panelKeys.Cycle, m.panelKeys.Back)
 	case m.focus == focusNotes:
 		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
+	case m.focus == focusAgents:
+		left = shortHelp(m.help, m.agentKeys.Move, m.agentKeys.Open,
+			m.agentKeys.New, m.agentKeys.Close, m.agentKeys.Back)
 	default:
 		left = shortHelp(m.help, m.keys.Send, m.keys.Scroll, m.keys.Cycle,
-			m.keys.Bench, m.keys.Reset, m.keys.Quit)
+			m.keys.Spawn, m.keys.Switch, m.keys.Debug, m.keys.Bench, m.keys.Reset, m.keys.Quit)
 	}
 	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
 	// подсказываем, чем вернуться.
 	if !m.follow {
 		left = stNote.Render("↑ отлистано, End — к последнему ответу") + "  " + left
 	}
+	if m.flash != "" {
+		left = stErr.Render(m.flash)
+	}
+	// Расход всего пула: сюда же попадают вызовы агентов сравнения по Ctrl+E.
+	sp := m.pool.Spent()
 	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
-		m.tot.calls, m.tot.prompt, m.tot.completion, m.tot.cost)
+		sp.Calls, sp.Prompt, sp.Completion, sp.CostUSD)
 	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1

@@ -19,6 +19,9 @@ type chatKeys struct {
 	Cycle   key.Binding
 	Back    key.Binding
 	Panel   key.Binding
+	Spawn   key.Binding
+	Switch  key.Binding
+	Debug   key.Binding
 	Bench   key.Binding
 	Reset   key.Binding
 	Clear   key.Binding
@@ -43,6 +46,14 @@ type notesKeys struct {
 	Back key.Binding
 }
 
+type agentKeys struct {
+	Move  key.Binding
+	Open  key.Binding
+	New   key.Binding
+	Close key.Binding
+	Back  key.Binding
+}
+
 type labKeys struct {
 	Run     key.Binding
 	Scroll  key.Binding
@@ -59,13 +70,16 @@ func newChatKeys(withBench bool) chatKeys {
 		Newline: key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("Ctrl+J", "перенос")),
 		Scroll: key.NewBinding(key.WithKeys("pgup", "pgdown", "shift+up", "shift+down"),
 			key.WithHelp("PgUp/PgDn", "прокрутка")),
-		Cycle: key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
-		Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
-		Panel: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
-		Bench: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
-		Reset: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
-		Clear: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
-		Quit:  key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
+		Cycle:  key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
+		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
+		Panel:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
+		Spawn:  key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый агент")),
+		Switch: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("Ctrl+O", "агенты")),
+		Debug:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl+D", "внутри агента")),
+		Bench:  key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
+		Reset:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
+		Clear:  key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
+		Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
 	}
 	// Сравнение моделей появляется только там, где оно реализовано:
 	// подсказка не должна обещать клавишу, которой нет.
@@ -94,6 +108,16 @@ func newNotesKeys(backHelp string) notesKeys {
 	return notesKeys{
 		Line: key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "новая строка")),
 		Back: key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", backHelp)),
+	}
+}
+
+func newAgentKeys() agentKeys {
+	return agentKeys{
+		Move:  key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "выбор")),
+		Open:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "открыть")),
+		New:   key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый")),
+		Close: key.NewBinding(key.WithKeys("ctrl+w", "delete"), key.WithHelp("Ctrl+W", "закрыть")),
+		Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
 	}
 }
 
