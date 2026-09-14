@@ -48,6 +48,16 @@ type Snapshot struct {
 	// Summary — сводка старой части разговора (день 9). История при этом
 	// лежит в History целиком: сводка — про контекст, а не про память.
 	Summary *summaryState `json:"summary,omitempty"`
+	// Facts — блок фактов sticky facts (день 10).
+	Facts []Fact `json:"facts,omitempty"`
+
+	// Ветки (день 10): History, Turns, Summary и Facts выше — активная ветка,
+	// остальные лежат в Parked.
+	Branch      string            `json:"branch,omitempty"`
+	Parked      map[string]thread `json:"parked,omitempty"`
+	Checkpoints []checkpoint      `json:"checkpoints,omitempty"`
+	BranchOrder []string          `json:"branch_order,omitempty"`
+	BranchFrom  map[string]string `json:"branch_from,omitempty"`
 }
 
 // Store — куда пул сохраняет агентов.
@@ -80,7 +90,45 @@ func (a *Agent) snapshot() Snapshot {
 		Turns:       append([]Turn(nil), a.turns...),
 		Calibration: a.calib,
 		Summary:     summaryPtr(a.summary),
+		Facts:       append([]Fact(nil), a.facts...),
+
+		Branch:      a.branch,
+		Parked:      cloneThreads(a.parked),
+		Checkpoints: cloneCheckpoints(a.checkpoints),
+		BranchOrder: append([]string(nil), a.branchOrder...),
+		BranchFrom:  cloneStrings(a.branchFrom),
 	}
+}
+
+func cloneThreads(m map[string]thread) map[string]thread {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]thread, len(m))
+	for k, v := range m {
+		out[k] = v.clone()
+	}
+	return out
+}
+
+func cloneCheckpoints(cs []checkpoint) []checkpoint {
+	out := make([]checkpoint, len(cs))
+	for i, c := range cs {
+		out[i] = c
+		out[i].State = c.State.clone()
+	}
+	return out
+}
+
+func cloneStrings(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func summaryPtr(s summaryState) *summaryState {

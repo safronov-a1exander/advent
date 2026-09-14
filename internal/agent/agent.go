@@ -49,8 +49,9 @@ const (
 	EventFinalStart
 	// EventChunk — очередной кусок финального ответа.
 	EventChunk
-	// EventCompress — старая часть истории сжата в сводку (день 9).
-	EventCompress
+	// EventContext — служебный вызов стратегии контекста: сжатие истории
+	// в сводку (день 9) или обновление фактов (день 10).
+	EventContext
 )
 
 // Event — уведомление для того, кто показывает ответ. Агенту всё равно,
@@ -135,6 +136,16 @@ type Agent struct {
 	turns   []Turn       // расход по ходам текущего разговора (день 8)
 	calib   float64      // во сколько раз факт провайдера больше сырой оценки; 0 — ещё не знаем
 	summary summaryState // сводка старой части разговора (день 9)
+	facts   []Fact       // блок фактов для sticky facts (день 10)
+
+	// Ветки разговора (день 10, branch.go). Активная ветка — это поля выше,
+	// неактивные отложены в parked.
+	branch      string
+	parked      map[string]thread
+	checkpoints []checkpoint
+	branchOrder []string
+	branchFrom  map[string]string
+
 	created time.Time
 	updated time.Time
 	// rev растёт при каждом изменении, которое стоит сохранить. По нему
@@ -212,6 +223,8 @@ func (a *Agent) Reset() {
 	a.history = nil
 	a.turns = nil // учёт ходов — про разговор; калибровка — про модель, её не трогаем
 	a.summary = summaryState{}
+	a.facts = nil
+	a.resetBranches() // сброс — новый разговор: ветки и чекпойнты тоже уходят
 	a.gen++
 	a.touch()
 	a.mu.Unlock()
@@ -247,7 +260,7 @@ func (a *Agent) changed() {
 func (a *Agent) Messages(text string) []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	system, past := window(a.cfg, a.history, a.summary)
+	system, past := window(a.cfg, a.history, a.summary, a.facts)
 	return compose(system, past, text)
 }
 
@@ -288,6 +301,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	cfg := a.cfg.Clone()
 	hist := append([]llm.Message(nil), a.history...)
 	sum := a.summary
+	facts := append([]Fact(nil), a.facts...)
 	gen := a.gen
 	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
 	a.mu.Unlock()
@@ -295,7 +309,10 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// День 9: если разговор разросся, старая часть сначала сжимается в сводку,
 	// и уже этот вопрос уходит с коротким контекстом.
 	sum = a.compress(ctx, cfg, hist, sum, gen, &turn, on)
-	system, past := window(cfg, hist, sum)
+	// День 10: факты обновляются по новому сообщению до отправки — вопрос
+	// уходит уже со свежим блоком.
+	facts = a.updateFacts(ctx, cfg, hist, facts, text, gen, &turn, on)
+	system, past := window(cfg, hist, sum, facts)
 
 	a.mu.Lock()
 	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)))

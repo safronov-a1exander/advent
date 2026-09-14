@@ -25,16 +25,36 @@ import (
 
 // Scenario — описание прогона.
 type Scenario struct {
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	Defaults    agent.Config   `yaml:"defaults"`
-	Variants    []agent.Config `yaml:"variants"`
-	Dialog      []Line         `yaml:"dialog"`
+	Name        string       `yaml:"name"`
+	Description string       `yaml:"description"`
+	Defaults    agent.Config `yaml:"defaults"`
+	Variants    []Variant    `yaml:"variants"`
+	Dialog      []Line       `yaml:"dialog"`
+}
+
+// Variant — конфиг агента и то, пользуется ли вариант ветками разговора.
+type Variant struct {
+	agent.Config `yaml:",inline"`
+	// Branches — выполнять команды веток сценария. Вариант без веток
+	// проходит те же реплики одной лентой: так видно, что ветки дают.
+	Branches bool `yaml:"branches"`
 }
 
 // Line — одна реплика пользователя и, если нужно, проверка ответа.
+// Вместо реплики строка может быть командой веток (день 10):
+//
+//   - checkpoint: развилка          # снять чекпойнт
+//   - branch: быстрый MVP           # новая ветка от чекпойнта from
+//     from: развилка
+//   - switch: быстрый MVP           # вернуться в ветку
 type Line struct {
 	Say string `yaml:"say"`
+
+	Checkpoint string `yaml:"checkpoint"`
+	Branch     string `yaml:"branch"`
+	From       string `yaml:"from"`
+	Switch     string `yaml:"switch"`
+
 	// Expect — подстроки, которые обязаны быть в ответе (без учёта регистра).
 	// Реплики с проверками — это вопросы на память о раннем разговоре.
 	Expect []string `yaml:"expect"`
@@ -59,11 +79,35 @@ func Load(path string) (*Scenario, error) {
 		return nil, fmt.Errorf("%s: нет variants", path)
 	}
 	for i, l := range s.Dialog {
-		if strings.TrimSpace(l.Say) == "" {
+		commands := 0
+		for _, c := range []string{l.Checkpoint, l.Branch, l.Switch} {
+			if strings.TrimSpace(c) != "" {
+				commands++
+			}
+		}
+		switch {
+		case commands > 1 || (commands == 1 && l.Say != ""):
+			return nil, fmt.Errorf("%s: строка %d — одна строка это либо реплика, либо одна команда веток", path, i+1)
+		case commands == 0 && strings.TrimSpace(l.Say) == "":
 			return nil, fmt.Errorf("%s: реплика %d пустая", path, i+1)
+		case l.Branch != "" && l.From == "":
+			return nil, fmt.Errorf("%s: строка %d — у branch нужен from (имя чекпойнта)", path, i+1)
 		}
 	}
 	return &s, nil
+}
+
+// Command — команда веток строки или пусто, если это реплика.
+func (l Line) Command() string {
+	switch {
+	case l.Checkpoint != "":
+		return "чекпойнт «" + l.Checkpoint + "»"
+	case l.Branch != "":
+		return "ветка «" + l.Branch + "» от «" + l.From + "»"
+	case l.Switch != "":
+		return "в ветку «" + l.Switch + "»"
+	}
+	return ""
 }
 
 // Step — результат одного хода варианта.
@@ -71,6 +115,10 @@ type Step struct {
 	Say    string
 	Answer string
 	Err    string
+	// Command — строка была командой веток: что сделано или почему пропущено.
+	Command string
+	// Branch — в какой ветке шёл ход.
+	Branch string
 	Turn   agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
@@ -81,28 +129,33 @@ type Step struct {
 
 // Result — прогон одного варианта.
 type Result struct {
-	Variant agent.Config
-	AgentID string
-	Steps   []Step
-	Elapsed time.Duration
-	Summary string // сводка к концу разговора, если была
+	Variant  agent.Config
+	Branches bool // вариант выполнял команды веток
+	AgentID  string
+	Steps    []Step
+	Elapsed  time.Duration
+	Summary  string       // сводка к концу разговора, если была
+	Facts    []agent.Fact // факты к концу разговора (sticky facts)
+	// BranchList — ветки агента к концу прогона, если вариант ветвился.
+	BranchList []agent.BranchInfo
 }
 
 // Totals — итоги варианта.
 type Totals struct {
-	Prompt, Cached, Completion  int
-	CompressPrompt, CompressOut int
-	CompressCalls               int
-	Checks, Passed              int
-	Errors                      int
-	Cost                        float64
+	Prompt, Cached, Completion int
+	AuxPrompt, AuxOut          int
+	AuxCalls                   int
+	Checks, Passed             int
+	Errors                     int
+	Cost                       float64
 }
 
-// Input — все входные токены варианта, включая служебные вызовы сжатия.
-func (t Totals) Input() int { return t.Prompt + t.CompressPrompt }
+// Input — все входные токены варианта, включая служебные вызовы
+// (сжатие в сводку, обновление фактов).
+func (t Totals) Input() int { return t.Prompt + t.AuxPrompt }
 
-// Output — все выходные токены, включая сводки.
-func (t Totals) Output() int { return t.Completion + t.CompressOut }
+// Output — все выходные токены, включая сводки и блоки фактов.
+func (t Totals) Output() int { return t.Completion + t.AuxOut }
 
 // Totals считает итоги.
 func (r Result) Totals() Totals {
@@ -111,9 +164,9 @@ func (r Result) Totals() Totals {
 		t.Prompt += s.Turn.Prompt
 		t.Cached += s.Turn.Cached
 		t.Completion += s.Turn.Completion
-		t.CompressPrompt += s.Turn.CompressPrompt
-		t.CompressOut += s.Turn.CompressCompletion
-		t.CompressCalls += s.Turn.CompressCalls
+		t.AuxPrompt += s.Turn.AuxPrompt
+		t.AuxOut += s.Turn.AuxCompletion
+		t.AuxCalls += s.Turn.AuxCalls
 		t.Cost += s.Cost
 		if s.Err != "" {
 			t.Errors++
@@ -136,7 +189,7 @@ type Progress func(variant string, step, total int)
 func Run(ctx context.Context, pool *agent.Pool, catalog []llm.ModelInfo, s *Scenario, progress Progress) ([]Result, error) {
 	cfgs := make([]agent.Config, len(s.Variants))
 	for i, v := range s.Variants {
-		cfg := agent.Overlay(s.Defaults, v)
+		cfg := agent.Overlay(s.Defaults, v.Config)
 		if cfg.Name == "" {
 			cfg.Name = fmt.Sprintf("вариант %d", i+1)
 		}
@@ -153,26 +206,30 @@ func Run(ctx context.Context, pool *agent.Pool, catalog []llm.ModelInfo, s *Scen
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i] = runVariant(ctx, pool, cfg, s.Dialog, progress)
+			results[i] = runVariant(ctx, pool, cfg, s.Variants[i].Branches, s.Dialog, progress)
 		}()
 	}
 	wg.Wait()
 	return results, nil
 }
 
-func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, lines []Line, progress Progress) Result {
+func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branches bool, lines []Line, progress Progress) Result {
 	a := pool.SpawnTemp(cfg)
 	defer pool.Remove(a.ID())
-	res := Result{Variant: cfg, AgentID: a.ID()}
+	res := Result{Variant: cfg, Branches: branches, AgentID: a.ID()}
 	start := time.Now()
 
 	for i, l := range lines {
 		if progress != nil {
 			progress(cfg.Name, i+1, len(lines))
 		}
+		if cmd := l.Command(); cmd != "" {
+			res.Steps = append(res.Steps, runCommand(a, l, cmd, branches))
+			continue
+		}
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
-		st := Step{Say: l.Say, Checked: len(l.Expect) > 0}
+		st := Step{Say: l.Say, Checked: len(l.Expect) > 0, Branch: a.ActiveBranch()}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -190,7 +247,51 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, lines [
 	}
 	res.Elapsed = time.Since(start)
 	res.Summary, _ = a.Summary()
+	res.Facts = a.Facts()
+	if br := a.Branches(); len(br) > 1 {
+		res.BranchList = br
+	}
 	return res
+}
+
+// Brief — ячейка хода для таблиц: токены запроса, служебные вызовы, ветка
+// и проверка. sent — добавить, сколько сообщений истории ушло с вопросом.
+func (st Step) Brief(sent bool) string {
+	switch {
+	case st.Err != "":
+		return "ошибка"
+	case st.Command != "":
+		if strings.Contains(st.Command, "пропущено") {
+			return "—"
+		}
+		return "→ " + st.Branch
+	}
+	c := fmt.Sprintf("%d", st.Turn.Prompt)
+	if sent {
+		c += fmt.Sprintf(" · %d сообщ.", st.Turn.Sent)
+	}
+	if st.Turn.AuxCalls > 0 {
+		c += fmt.Sprintf(" · +служ. %d", st.Turn.AuxPrompt)
+	}
+	if st.Branch != "" && st.Branch != agent.MainBranch {
+		c += " [" + st.Branch + "]"
+	}
+	if st.Checked {
+		if st.Passed {
+			c += " ✓"
+		} else {
+			c += " ✗"
+		}
+	}
+	return c
+}
+
+// Text — реплика строки или её команда веток для таблиц.
+func (l Line) Text() string {
+	if cmd := l.Command(); cmd != "" {
+		return "⎇ " + cmd
+	}
+	return strings.Join(strings.Fields(l.Say), " ")
 }
 
 // check — все ли ожидаемые подстроки есть в ответе. Регистр и неразрывные
@@ -211,4 +312,28 @@ func check(answer string, expect []string) (bool, []string) {
 		}
 	}
 	return len(missing) == 0, missing
+}
+
+// runCommand выполняет команду веток. Вариант без веток её пропускает —
+// и продолжает разговор той же лентой.
+func runCommand(a *agent.Agent, l Line, cmd string, branches bool) Step {
+	st := Step{Command: cmd, Branch: a.ActiveBranch()}
+	if !branches {
+		st.Command = cmd + " — пропущено: вариант без веток"
+		return st
+	}
+	var err error
+	switch {
+	case l.Checkpoint != "":
+		_, err = a.Checkpoint(l.Checkpoint)
+	case l.Branch != "":
+		_, err = a.Branch(l.Branch, l.From)
+	case l.Switch != "":
+		err = a.SwitchBranch(l.Switch)
+	}
+	if err != nil {
+		st.Err = err.Error()
+	}
+	st.Branch = a.ActiveBranch()
+	return st
 }

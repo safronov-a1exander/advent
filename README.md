@@ -47,7 +47,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -65,6 +65,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 7 | `day-07` | разговор переживает перезапуск | `docs/days/day07.md` |
 | 8 | `day-08` | работа с токенами | `docs/days/day08.md` |
 | 9 | `day-09` | сжатие истории через summary | `docs/days/day09.md` |
+| 10 | `day-10` | sliding window, sticky facts, ветки разговора | `docs/days/day10.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -75,10 +76,11 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 
 | режим | команда | клавиши |
 |---|---|---|
-| чат | `advent chat` | `Enter` отправить · `Tab` панель параметров и блокнот · `Esc` вернуться в диалог · `Ctrl+J` перенос · `Ctrl+R` сброс контекста · `Ctrl+L` очистить · `Ctrl+P` спрятать панель · `Ctrl+N` новый агент · `Ctrl+O` список агентов · `Ctrl+D` что внутри агента · `Ctrl+T` токены по ходам |
+| чат | `advent chat` | `Enter` отправить · `Tab` панель параметров и блокнот · `Esc` вернуться в диалог · `Ctrl+J` перенос · `Ctrl+R` сброс контекста · `Ctrl+L` очистить · `Ctrl+P` спрятать панель · `Ctrl+N` новый агент · `Ctrl+O` список агентов · `Ctrl+B` ветки разговора · `Ctrl+D` что внутри агента · `Ctrl+T` токены по ходам |
 | список агентов | `Ctrl+O` в чате | `↑↓` выбор · `Enter` открыть · `Ctrl+N` новый · `Ctrl+W` закрыть · `Esc` в диалог |
+| ветки разговора | `Ctrl+B` в чате | `↑↓` выбор · `Ctrl+S` чекпойнт в текущей точке · `Enter` на ветке — перейти в неё, на чекпойнте — новая ветка от него · `Esc` в диалог |
 | флот | `advent swarm -fleet agents/fleet.yaml` | — |
-| сравнение стратегий контекста | `advent dialog -scenario scenarios/day09-compression.yaml` | — |
+| сравнение стратегий контекста | `advent dialog -scenario scenarios/day09-compression.yaml`, `scenarios/day10-strategies.yaml` | — |
 | сохранённые разговоры | `advent sessions`, `advent sessions -show <id>` · в чате `-new`, `-session <id>`, `-no-save` | — |
 | сравнение | `advent lab -scenario ...` | `r` прогнать · `↑↓` вариант · `t` сводка · `Tab` панель и блокнот · `Esc` к результатам · `q` выход |
 | одиночный запрос | `advent ask "вопрос"` | — |
@@ -105,6 +107,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 6 | параметры панели — это конфиг текущего агента; у каждого агента свои |
 | день 8 | `лимит контекста` — свой потолок агента; флаги `-context-limit`, `-thinking` |
 | день 9 | `контекст` (полная история / summary), `хвост как есть`, `сжимать каждые`; флаги `-context`, `-keep-last`, `-summarize-every` |
+| день 10 | `контекст` дополнился sliding window и sticky facts; ветки разговора — `Ctrl+B`; в сценарии `advent dialog` — команды `checkpoint`/`branch`/`switch` и `branches: true` у варианта |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.

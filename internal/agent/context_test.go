@@ -19,7 +19,7 @@ func TestSummaryKeepsTailAndCompressesRest(t *testing.T) {
 
 	var compressions int
 	onEv := func(e Event) {
-		if e.Kind == EventCompress {
+		if e.Kind == EventContext {
 			compressions++
 		}
 	}
@@ -67,7 +67,7 @@ func TestSummaryKeepsTailAndCompressesRest(t *testing.T) {
 	// сжатие учтено в ходе, где случилось
 	var withCompress int
 	for _, tr := range a.Turns() {
-		withCompress += tr.CompressCalls
+		withCompress += tr.AuxCalls
 	}
 	if withCompress != 1 {
 		t.Fatalf("вызовов сжатия в учёте ходов: %d", withCompress)
@@ -109,7 +109,7 @@ func TestCompressionFailureDoesNotBreakTurn(t *testing.T) {
 	var warned bool
 	for i := 1; i <= 3; i++ {
 		_, err := a.Ask(t.Context(), fmt.Sprintf("реплика %d", i), func(e Event) {
-			if e.Kind == EventCompress && strings.Contains(e.Label, "не удалось") {
+			if e.Kind == EventContext && strings.Contains(e.Label, "не удалось") {
 				warned = true
 			}
 		})

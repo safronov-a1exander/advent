@@ -76,7 +76,8 @@ const (
 	focusInput focusTarget = iota
 	focusPanel
 	focusNotes
-	focusAgents // список агентов на месте панели параметров
+	focusAgents   // список агентов на месте панели параметров
+	focusBranches // ветки и чекпойнты текущего разговора там же
 )
 
 // notesHeight — сколько строк блокнота видно одновременно.
@@ -111,10 +112,13 @@ type Model struct {
 	// поэтому правка системного промпта действует сразу.
 	pool *agent.Pool
 	ag   *agent.Agent
-	// transcripts — ленты неактивных агентов. Лента текущего живёт в lines;
-	// при переключении она откладывается сюда, а на экран встаёт чужая.
+	// transcripts — ленты неактивных разговоров: агентов и их веток (ключ
+	// laneKey). Лента текущего живёт в lines; при переключении она
+	// откладывается сюда, а на экран встаёт другая.
 	transcripts map[string][]string
 	agentSel    int
+	branchSel   int
+	branchKeys  branchKeys
 	// flash — короткое пояснение в строке состояния до следующей клавиши:
 	// почему нажатие ничего не сделало.
 	flash string
@@ -152,6 +156,7 @@ func NewModel(o Options) *Model {
 		notesKeys: newNotesKeys("вернуться в диалог"),
 		agentKeys: newAgentKeys(),
 	}
+	m.branchKeys = newBranchKeys()
 	m.pool = o.Pool
 	m.transcripts = map[string][]string{}
 	m.ag = m.pickStartAgent()
@@ -266,6 +271,12 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.focus == focusBranches {
+		if cmd, handled := m.branchesKey(msg); handled {
+			return m, cmd
+		}
+		return m, nil
+	}
 
 	if m.focus == focusPanel {
 		if cmd, handled := m.panel.Update(msg); handled {
@@ -353,6 +364,9 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+o":
 		return m, m.openAgents()
 
+	case "ctrl+b":
+		return m, m.openBranches()
+
 	case "ctrl+e":
 		if m.busy.Load() {
 			return m, nil
@@ -401,6 +415,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) resetConversation() {
+	// сброс убирает и ветки: их ленты больше не к чему возвращать
+	if len(m.ag.Branches()) > 1 {
+		m.dropLanes(m.ag)
+	}
 	m.ag.Reset()
 	m.pushLine("")
 	m.pushLine(stDim.Render("— контекст агента " + m.ag.ID() + " сброшен (счётчики расхода не обнуляются) —"))
@@ -436,15 +454,23 @@ func (m *Model) pickStartAgent() *agent.Agent {
 // replay рисует ленту восстановленного разговора из истории агента:
 // после перезапуска на экране должна быть та же переписка, что и до него.
 func (m *Model) replay(a *agent.Agent) []string {
-	hist := a.History()
-	model := a.Config().Model
-	var out []string
 	where := ""
 	if st := m.pool.Store(); st != nil {
 		where = " из " + st.Path(a.ID())
 	}
-	out = append(out, stDim.Render(fmt.Sprintf("— разговор %s восстановлен%s · сообщений %d · обновлён %s —",
-		a.ID(), where, len(hist), a.Updated().Format("02.01 15:04"))))
+	head := fmt.Sprintf("— разговор %s восстановлен%s · сообщений %d · обновлён %s —",
+		a.ID(), where, len(a.History()), a.Updated().Format("02.01 15:04"))
+	if br := a.ActiveBranch(); br != agent.MainBranch {
+		head += stNote.Render(" ⎇ " + br)
+	}
+	return replayWith(a, head)
+}
+
+// replayWith — переписка активной ветки агента под заголовком.
+func replayWith(a *agent.Agent, head string) []string {
+	hist := a.History()
+	model := a.Config().Model
+	out := []string{stDim.Render(head)}
 	for _, msg := range hist {
 		out = append(out, "")
 		switch msg.Role {
@@ -483,7 +509,40 @@ func (m *Model) dumpAgent() {
 		st.Turns, st.Calls, st.Errors, st.Prompt, st.Cached, st.Completion, st.Reasoning, st.CostUSD)))
 	// День 9: память и контекст расходятся — показываем оба.
 	hist := len(m.ag.History())
-	if text, covered := m.ag.Summary(); text != "" && cfg.Context == agent.ContextSummary {
+	if br := m.ag.Branches(); len(br) > 1 {
+		names := make([]string, len(br))
+		for i, b := range br {
+			names[i] = b.Name
+			if b.Active {
+				names[i] = "●" + b.Name
+			}
+		}
+		m.pushLine(stDim.Render(fmt.Sprintf("  ветки    %s · чекпойнтов %d — у каждой ветки своя история, сводка и факты",
+			strings.Join(names, ", "), len(m.ag.Checkpoints()))))
+	}
+	sent := -1 // сообщений истории в запросе: без system и следующего вопроса
+	for _, msg := range stack {
+		if msg.Role != llm.RoleSystem {
+			sent++
+		}
+	}
+	switch text, covered := m.ag.Summary(); {
+	case cfg.Context == agent.ContextWindow:
+		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений хранится целиком; в запрос уходят последние %d — всё раньше модель не видит",
+			hist, max(sent, 0))))
+	case cfg.Context == agent.ContextFacts:
+		facts := m.ag.Facts()
+		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений хранится целиком; в запрос уходят факты (%d) и последние %d сообщений",
+			hist, len(facts), max(sent, 0))))
+		if len(facts) == 0 {
+			m.pushLine(stDim.Render("  факты:   пока пусто — появятся после первой реплики"))
+		} else {
+			m.pushLine(stDim.Render("  факты:"))
+			for _, f := range facts {
+				m.pushLine(stDim.Render("    " + shorten(f.Key+": "+f.Value, 110)))
+			}
+		}
+	case text != "" && cfg.Context == agent.ContextSummary:
 		// Несжатых бывает больше хвоста: они копятся, пока за хвостом
 		// не наберётся порог следующего сжатия.
 		pending := hist - covered - cfg.KeepLastN()
@@ -498,7 +557,7 @@ func (m *Model) dumpAgent() {
 		for _, l := range strings.Split(shorten2(text, 8), "\n") {
 			m.pushLine(stDim.Render("    " + l))
 		}
-	} else {
+	default:
 		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений; в запрос уходят все (%s)", hist, agent.ContextLabel(cfg.Context))))
 	}
 	m.pushLine(stDim.Render(fmt.Sprintf("  стек     %d сообщений уйдёт в API со следующим вопросом:", len(stack))))
@@ -568,13 +627,13 @@ func (m *Model) onEvent(e agent.Event) {
 		m.pushLine(stBot.Render("▸ " + e.Label))
 	case agent.EventChunk:
 		m.partial.WriteString(e.Content)
-	case agent.EventCompress:
+	case agent.EventContext:
 		if e.Usage.PromptTokens == 0 {
 			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))
 			break
 		}
 		m.pushLine(stNote.Render("▸ " + e.Label))
-		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ служебный вызов: вход %d · сводка %d токенов · %s",
+		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ служебный вызов: вход %d · выход %d токенов · %s",
 			e.Usage.PromptTokens, e.Usage.CompletionTokens, e.Latency.Round(time.Millisecond))))
 		for _, l := range strings.Split(shorten2(e.Content, 6), "\n") {
 			m.pushLine(stDim.Render("  " + l))
@@ -614,7 +673,7 @@ func (m *Model) finish(reply *agent.Reply, err error) {
 func (m *Model) pushLine(s string) { m.lines = append(m.lines, s) }
 
 func (m *Model) panelW() int {
-	if !m.showPanel && m.focus != focusAgents {
+	if !m.showPanel && m.focus != focusAgents && m.focus != focusBranches {
 		return 0
 	}
 	w := m.w / 3
@@ -704,6 +763,9 @@ func (m *Model) View() tea.View {
 	if n := m.pool.Len(); n > 1 {
 		header += "  " + stNote.Render(fmt.Sprintf("агент %s · в пуле %d", m.ag.ID(), n))
 	}
+	if n := len(m.ag.Branches()); n > 1 {
+		header += "  " + stNote.Render(fmt.Sprintf("⎇ %s · веток %d", m.ag.ActiveBranch(), n))
+	}
 
 	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width() + 2).Render(m.vp.View())
 	body := transcript
@@ -711,10 +773,13 @@ func (m *Model) View() tea.View {
 		// Рамка панели по высоте содержимого, а не во весь экран: параметров
 		// немного, и высокий пустой прямоугольник справа смотрится как брак.
 		side := m.panel.View(m.focus == focusPanel)
-		if m.focus == focusAgents {
+		switch m.focus {
+		case focusAgents:
 			side = m.agentsView(pw - 2)
+		case focusBranches:
+			side = m.branchesView(pw - 2)
 		}
-		panel := m.frame(m.focus == focusPanel || m.focus == focusAgents).Width(pw).Render(side)
+		panel := m.frame(m.focus != focusInput && m.focus != focusNotes).Width(pw).Render(side)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, transcript, panel)
 	}
 
@@ -786,8 +851,11 @@ func (m *Model) status() string {
 	case m.focus == focusAgents:
 		left = shortHelp(h, m.agentKeys.Move, m.agentKeys.Open,
 			m.agentKeys.New, m.agentKeys.Close, m.agentKeys.Back)
+	case m.focus == focusBranches:
+		left = shortHelp(h, m.branchKeys.Move, m.branchKeys.Open,
+			m.branchKeys.Checkpoint, m.branchKeys.Back)
 	default:
-		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Debug,
+		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Branches, m.keys.Debug,
 			m.keys.Tokens, m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
 	}
 	left = prefix + left

@@ -9,7 +9,7 @@ import (
 )
 
 // Markdown — отчёт о прогоне: итоги, рост запроса по ходам, проверки
-// на память с ответами и сводки к концу разговора.
+// на память с ответами, а к концу разговора — сводки, факты и ветки.
 func Markdown(s *Scenario, provider string, res []Result, started time.Time) string {
 	var b strings.Builder
 	title := s.Name
@@ -21,23 +21,24 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 		b.WriteString(d + "\n\n")
 	}
 	fmt.Fprintf(&b, "- провайдер: `%s`\n- прогон: %s\n- реплик в диалоге: %d, из них с проверкой на память: %d\n\n",
-		provider, started.Format("2006-01-02 15:04:05"), len(s.Dialog), countChecks(s))
+		provider, started.Format("2006-01-02 15:04:05"), countSays(s), countChecks(s))
 
 	b.WriteString("## Итоги\n\n")
-	b.WriteString("| вариант | контекст | вход, всего | из них из кэша | из них на сжатие | выход | вызовов сжатия | память | $ |\n")
+	b.WriteString("| вариант | контекст | вход, всего | из них из кэша | из них служебные | выход | служебных вызовов | память | $ |\n")
 	b.WriteString("|---|---|---:|---:|---:|---:|---:|---|---:|\n")
 	for _, r := range res {
 		t := r.Totals()
 		fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %d | %d | %d/%d | %.6f |\n",
-			r.Variant.Name, contextOf(r.Variant), t.Input(), t.Cached, t.CompressPrompt,
-			t.Output(), t.CompressCalls, t.Passed, t.Checks, t.Cost)
+			r.Variant.Name, VariantLabel(r), t.Input(), t.Cached, t.AuxPrompt,
+			t.Output(), t.AuxCalls, t.Passed, t.Checks, t.Cost)
 	}
-	b.WriteString("\n«Вход, всего» включает служебные вызовы сжатия: сжатие само стоит токенов, " +
-		"и без них сравнение было бы нечестным. «Из кэша» — входные токены, которые провайдер " +
-		"взял из кэша префикса и тарифицировал дешевле.\n\n")
+	b.WriteString("\n«Вход, всего» включает служебные вызовы — сжатие в сводку и обновление фактов: " +
+		"они сами стоят токенов, и без них сравнение было бы нечестным. «Из кэша» — входные токены, " +
+		"которые провайдер взял из кэша префикса и тарифицировал дешевле.\n\n")
 
 	b.WriteString("## Запрос по ходам\n\n")
-	b.WriteString("Токены запроса (факт провайдера) и сколько сообщений истории ушло вместе с вопросом.\n\n")
+	b.WriteString("Токены запроса (факт провайдера), сколько сообщений истории ушло вместе с вопросом, " +
+		"служебные вызовы и ветка, если не основная. Строки «⎇» — команды веток: вариант без веток их пропускает.\n\n")
 	b.WriteString("| ход | реплика |")
 	for _, r := range res {
 		fmt.Fprintf(&b, " %s |", r.Variant.Name)
@@ -48,9 +49,13 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 	}
 	b.WriteString("\n")
 	for i, l := range s.Dialog {
-		fmt.Fprintf(&b, "| %d | %s |", i+1, cell(l.Say, 60))
+		fmt.Fprintf(&b, "| %d | %s |", i+1, cell(l.Text(), 60))
 		for _, r := range res {
-			b.WriteString(" " + stepCell(r, i) + " |")
+			c := "—"
+			if i < len(r.Steps) {
+				c = r.Steps[i].Brief(true)
+			}
+			b.WriteString(" " + cell(c, 80) + " |")
 		}
 		b.WriteString("\n")
 	}
@@ -77,25 +82,50 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 			case !st.Passed:
 				mark = "✗ нет: " + strings.Join(st.Missing, ", ")
 			}
-			fmt.Fprintf(&b, "- **%s** %s\n  > %s\n", r.Variant.Name, mark, cell(st.Answer, 400))
+			where := ""
+			if st.Branch != "" && st.Branch != agent.MainBranch {
+				where = " _(ветка «" + st.Branch + "»)_"
+			}
+			fmt.Fprintf(&b, "- **%s**%s %s\n  > %s\n", r.Variant.Name, where, mark, cell(st.Answer, 400))
 		}
 		b.WriteString("\n")
 	}
 
-	var withSummary bool
 	for _, r := range res {
-		if r.Summary != "" {
-			withSummary = true
+		if len(r.BranchList) == 0 {
+			continue
 		}
-	}
-	if withSummary {
-		b.WriteString("## Сводка к концу разговора\n\n")
-		for _, r := range res {
-			if r.Summary == "" {
-				continue
+		fmt.Fprintf(&b, "## Ветки варианта «%s»\n\n| ветка | от чекпойнта | сообщений | активна |\n|---|---|---:|---|\n", r.Variant.Name)
+		for _, br := range r.BranchList {
+			active := ""
+			if br.Active {
+				active = "да"
 			}
-			fmt.Fprintf(&b, "**%s**\n\n```\n%s\n```\n\n", r.Variant.Name, strings.TrimSpace(r.Summary))
+			from := br.From
+			if from == "" {
+				from = "—"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %d | %s |\n", br.Name, from, br.Messages, active)
 		}
+		b.WriteString("\n")
+	}
+
+	for _, r := range res {
+		if len(r.Facts) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "## Факты к концу разговора — %s\n\n", r.Variant.Name)
+		for _, f := range r.Facts {
+			fmt.Fprintf(&b, "- **%s**: %s\n", f.Key, f.Value)
+		}
+		b.WriteString("\n")
+	}
+
+	for _, r := range res {
+		if r.Summary == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "## Сводка к концу разговора — %s\n\n```\n%s\n```\n\n", r.Variant.Name, strings.TrimSpace(r.Summary))
 	}
 	return b.String()
 }
@@ -110,34 +140,30 @@ func countChecks(s *Scenario) int {
 	return n
 }
 
-func contextOf(c agent.Config) string {
-	sum := agent.ContextLabel(c.Context)
-	if c.Context == agent.ContextSummary {
-		sum += fmt.Sprintf(" (хвост %d, сжатие каждые %d)", c.KeepLastN(), c.SummarizeEveryN())
-	}
-	return sum
-}
-
-func stepCell(r Result, i int) string {
-	if i >= len(r.Steps) {
-		return "—"
-	}
-	st := r.Steps[i]
-	if st.Err != "" {
-		return "ошибка"
-	}
-	c := fmt.Sprintf("%d · %d сообщ.", st.Turn.Prompt, st.Turn.Sent)
-	if st.Turn.CompressCalls > 0 {
-		c += fmt.Sprintf(" · +сжатие %d", st.Turn.CompressPrompt)
-	}
-	if st.Checked {
-		if st.Passed {
-			c += " ✓"
-		} else {
-			c += " ✗"
+func countSays(s *Scenario) int {
+	n := 0
+	for _, l := range s.Dialog {
+		if l.Command() == "" {
+			n++
 		}
 	}
-	return c
+	return n
+}
+
+// VariantLabel — стратегия контекста варианта с параметрами.
+func VariantLabel(r Result) string {
+	c := r.Variant
+	label := agent.ContextLabel(c.Context)
+	switch c.Context {
+	case agent.ContextSummary:
+		label += fmt.Sprintf(" (хвост %d, сжатие каждые %d)", c.KeepLastN(), c.SummarizeEveryN())
+	case agent.ContextWindow, agent.ContextFacts:
+		label += fmt.Sprintf(" (хвост %d)", c.KeepLastN())
+	}
+	if r.Branches {
+		label += " + ветки"
+	}
+	return label
 }
 
 // cell — текст в одну строку для таблицы markdown.

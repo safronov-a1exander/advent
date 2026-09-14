@@ -90,9 +90,9 @@ func (m *Model) activate(a *agent.Agent) {
 		return
 	}
 	m.ag.SetConfig(m.set.AgentConfig())
-	m.transcripts[m.ag.ID()] = m.lines
+	m.transcripts[laneKey(m.ag)] = m.lines
 	m.ag = a
-	m.lines = m.transcripts[a.ID()]
+	m.lines = m.transcripts[laneKey(a)]
 	if m.lines == nil && len(a.History()) > 0 {
 		// восстановленный после перезапуска разговор ещё ни разу не открывали
 		m.lines = m.replay(a)
@@ -107,7 +107,7 @@ func (m *Model) activate(a *agent.Agent) {
 // Прежний остаётся в пуле со всей перепиской, вернуться — через список.
 func (m *Model) newAgent() {
 	a := m.spawn()
-	m.transcripts[a.ID()] = []string{stDim.Render(fmt.Sprintf(
+	m.transcripts[laneKey(a)] = []string{stDim.Render(fmt.Sprintf(
 		"— новый агент %s: настройки скопированы, история пуста · Ctrl+O — список агентов —", a.ID()))}
 	m.activate(a)
 }
@@ -142,7 +142,7 @@ func (m *Model) closeAgent(a *agent.Agent) {
 	if err := m.pool.Remove(a.ID()); err != nil {
 		m.flash = "агент закрыт, но файл разговора не перенесён в архив: " + err.Error()
 	}
-	delete(m.transcripts, a.ID())
+	m.dropLanes(a)
 	if m.agentSel >= m.pool.Len() {
 		m.agentSel = m.pool.Len() - 1
 	}
@@ -181,6 +181,9 @@ func (m *Model) agentsView(width int) string {
 		b.WriteString(stDim.Render("    "+short(title, width-4)) + "\n")
 		b.WriteString(stDim.Render("    "+short(fmt.Sprintf("%s · сообщений %d · %s",
 			cfg.Model, len(a.History()), when(a.Updated())), width-4)) + "\n")
+		if n := len(a.Branches()); n > 1 {
+			b.WriteString(stDim.Render("    "+short(fmt.Sprintf("⎇ %s · веток %d", a.ActiveBranch(), n), width-4)) + "\n")
+		}
 		if i < m.pool.Len()-1 {
 			b.WriteString("\n")
 		}

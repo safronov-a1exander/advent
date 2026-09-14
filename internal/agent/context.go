@@ -18,18 +18,26 @@ import (
 //   - контекст — то, что уходит в модель с очередным вопросом. Он ограничен
 //     окном и деньгами, и именно его стратегия решает, как собрать.
 //
-// Стратегия «полная история» отправляет всё. Стратегия «summary» отправляет
-// последние N сообщений как есть, а всё, что раньше, — одной сводкой, которая
-// обновляется по мере разговора.
+// Стратегии:
+//   - полная история — всё как есть;
+//   - summary (день 9) — последние N сообщений как есть, всё раньше — сводкой;
+//   - sliding window (день 10) — только последние N сообщений, остальное
+//     в запрос не попадает вовсе;
+//   - sticky facts (день 10) — блок фактов «ключ: значение» и последние N.
+//
+// Ветки разговора (Branching, день 10) — не способ собрать контекст, а форма
+// самой истории, поэтому они в branch.go и работают с любой стратегией.
 
 // Стратегии контекста — поле Config.Context.
 const (
 	ContextFull    = ""        // вся история как есть
 	ContextSummary = "summary" // сводка старой части + последние сообщения
+	ContextWindow  = "window"  // только последние сообщения
+	ContextFacts   = "facts"   // блок фактов + последние сообщения
 )
 
 // ContextStrategies — порядок перебора в панели.
-var ContextStrategies = []string{ContextFull, ContextSummary}
+var ContextStrategies = []string{ContextFull, ContextWindow, ContextFacts, ContextSummary}
 
 // Параметры сжатия по умолчанию.
 const (
@@ -42,6 +50,10 @@ func ContextLabel(name string) string {
 	switch name {
 	case ContextSummary:
 		return "summary"
+	case ContextWindow:
+		return "sliding window"
+	case ContextFacts:
+		return "sticky facts"
 	default:
 		return "полная история"
 	}
@@ -52,6 +64,10 @@ func ContextHint(name string) string {
 	switch name {
 	case ContextSummary:
 		return "старая часть разговора уходит в модель сводкой, последние сообщения — как есть; история при этом хранится целиком"
+	case ContextWindow:
+		return "в модель уходят только последние сообщения («хвост как есть»); всё раньше модель не видит — дёшево, но ранние факты теряются"
+	case ContextFacts:
+		return "после каждого сообщения служебный вызов обновляет блок фактов «ключ: значение»; в модель уходят факты и последние сообщения"
 	default:
 		return "в модель уходит вся история; растёт с каждым ходом, зато ничего не теряется"
 	}
@@ -80,7 +96,17 @@ type summaryState struct {
 
 // window собирает то, что уйдёт в модель: системный промпт и прошлые
 // сообщения. Вопрос добавляется отдельно.
-func window(cfg Config, hist []llm.Message, sum summaryState) (string, []llm.Message) {
+func window(cfg Config, hist []llm.Message, sum summaryState, facts []Fact) (string, []llm.Message) {
+	switch cfg.Context {
+	case ContextWindow:
+		return cfg.System, tail(hist, cfg.keepLast())
+	case ContextFacts:
+		system := cfg.System
+		if len(facts) > 0 {
+			system = joinSystem(cfg.System, factsBlock(facts))
+		}
+		return system, tail(hist, cfg.keepLast())
+	}
 	if cfg.Context != ContextSummary || sum.Text == "" {
 		return cfg.System, hist
 	}
@@ -91,14 +117,33 @@ func window(cfg Config, hist []llm.Message, sum summaryState) (string, []llm.Mes
 	// Сводка дописывается к системному промпту, а не отдельным сообщением:
 	// так её одинаково принимают все OpenAI-совместимые API, и модель
 	// читает её как условие разговора, а не как реплику собеседника.
-	system := strings.TrimSpace(cfg.System)
 	block := "Краткое содержание более ранней части этого разговора (сами сообщения не приводятся):\n" + sum.Text
-	if system != "" {
-		system += "\n\n" + block
-	} else {
-		system = block
+	return joinSystem(cfg.System, block), hist[covered:]
+}
+
+// joinSystem дописывает блок к системному промпту.
+func joinSystem(system, block string) string {
+	system = strings.TrimSpace(system)
+	if system == "" {
+		return block
 	}
-	return system, hist[covered:]
+	return system + "\n\n" + block
+}
+
+// tail — последние n сообщений, не разрывая пару вопрос–ответ: окно
+// всегда начинается с реплики пользователя.
+func tail(hist []llm.Message, n int) []llm.Message {
+	if n <= 0 {
+		return nil
+	}
+	start := len(hist) - n
+	if start <= 0 {
+		return hist
+	}
+	if start%2 != 0 {
+		start++
+	}
+	return hist[start:]
 }
 
 // needsCompression — пора ли сжимать: за сохраняемым хвостом накопилось
@@ -181,27 +226,17 @@ func (a *Agent) compress(ctx context.Context, cfg Config, hist []llm.Message, su
 	start := time.Now()
 	resp, err := a.client.Chat(ctx, req)
 	a.record(req, resp, err, "сжатие истории", true)
-
-	a.mu.Lock()
+	a.accountAux(resp, err)
 	if err != nil {
-		a.stats.Errors++
-	} else {
-		a.stats.add(resp)
-	}
-	a.mu.Unlock()
-	if a.onCall != nil {
-		a.onCall(resp, err)
-	}
-	if err != nil {
-		on(Event{Kind: EventCompress, Label: "сжатие не удалось — вопрос уйдёт без него", Content: err.Error()})
+		on(Event{Kind: EventContext, Label: "сжатие не удалось — вопрос уйдёт без него", Content: err.Error()})
 		return sum
 	}
 
 	next := summaryState{Text: strings.TrimSpace(resp.Content), Covered: upTo}
-	turn.CompressCalls++
-	turn.CompressPrompt += resp.Usage.PromptTokens
-	turn.CompressCompletion += resp.Usage.CompletionTokens
-	on(Event{Kind: EventCompress,
+	turn.AuxCalls++
+	turn.AuxPrompt += resp.Usage.PromptTokens
+	turn.AuxCompletion += resp.Usage.CompletionTokens
+	on(Event{Kind: EventContext,
 		Label:   fmt.Sprintf("сжато %d сообщений в сводку (всего сводка покрывает %d)", upTo-sum.Covered, upTo),
 		Content: next.Text, Usage: resp.Usage, CostUSD: resp.CostUSD, Latency: time.Since(start)})
 
