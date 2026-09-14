@@ -3,14 +3,17 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/report"
 	"github.com/safronov-a1exander/advent/internal/runner"
@@ -33,7 +36,13 @@ type Lab struct {
 
 	vp   viewport.Model
 	sp   spinner.Model
-	w, h int
+	help help.Model
+
+	keys      labKeys
+	panelKeys panelKeys
+	editKeys  editKeys
+	notesKeys notesKeys
+	w, h      int
 
 	focus     focusTarget
 	showPanel bool
@@ -50,6 +59,7 @@ type Lab struct {
 	err      error
 	events   chan tea.Msg
 	showTbl  bool
+	summary  table.Model
 }
 
 type labEventMsg runner.Event
@@ -65,24 +75,37 @@ func NewLab(sc *scenario.Scenario, r *runner.Runner, set *Settings, reportDir st
 	l := &Lab{
 		sc: sc, run: r, sp: sp, report: reportDir,
 		byID: map[string][]int{}, set: set, showPanel: true,
+		help:      newHelp(),
+		keys:      newLabKeys(),
+		panelKeys: newPanelKeys("к результатам"),
+		editKeys:  newEditKeys(),
+		notesKeys: newNotesKeys("к результатам"),
 	}
 	l.panel = NewPanel(set.Fields(), 34)
 	l.notes = NewNotes(60, notesHeight)
 	return l
 }
 
-func (l *Lab) Init() tea.Cmd { return l.sp.Tick }
+func (l *Lab) Init() tea.Cmd {
+	// см. chat.go: тему терминала запрашиваем сами
+	return tea.Batch(tea.RequestBackgroundColor, l.sp.Tick)
+}
 
 func (l *Lab) Busy() bool { return l.busy.Load() }
 
 func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if themeFromMsg(msg) {
+		l.refresh()
+		return l, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		l.w, l.h = msg.Width, msg.Height
 		l.resize()
 		l.ready = true
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return l.onKey(msg)
 
 	case NoteMsg:
@@ -120,8 +143,18 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		l.showTbl = true
+		l.summary = newSummaryTable(l.res, l.w-8, l.vp.Height()-8)
 		l.refresh()
 		return l, nil
+
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		if l.showTbl && l.res != nil {
+			l.summary, cmd = l.summary.Update(msg)
+		} else {
+			l.vp, cmd = l.vp.Update(msg)
+		}
+		return l, cmd
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -132,7 +165,7 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return l, nil
 }
 
-func (l *Lab) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (l *Lab) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return l, tea.Quit
 	}
@@ -198,21 +231,44 @@ func (l *Lab) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "t":
 		l.showTbl = !l.showTbl
-		l.refresh()
-	case "up", "k":
-		if l.sel > 0 {
-			l.sel--
-			l.refresh()
+		if l.showTbl && l.res != nil {
+			l.summary = newSummaryTable(l.res, l.w-8, l.vp.Height()-8)
 		}
-	case "down", "j":
-		if l.sel < len(l.sc.Variants)-1 {
+		l.refresh()
+	case "up", "k", "down", "j":
+		// В сводке стрелки водят по строкам таблицы, в обычном виде —
+		// по списку вариантов слева.
+		if l.showTbl && l.res != nil {
+			var cmd tea.Cmd
+			l.summary, cmd = l.summary.Update(msg)
+			l.refresh()
+			return l, cmd
+		}
+		if msg.String() == "up" || msg.String() == "k" {
+			if l.sel > 0 {
+				l.sel--
+			}
+		} else if l.sel < len(l.sc.Variants)-1 {
 			l.sel++
+		}
+		l.refresh()
+	case "enter":
+		// Enter в сводке открывает ответы того варианта, на котором стоишь.
+		if l.showTbl && l.res != nil {
+			l.sel = l.summary.Cursor()
+			l.showTbl = false
 			l.refresh()
 		}
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
 		l.vp, cmd = l.vp.Update(msg)
 		return l, cmd
+	case "home":
+		l.vp.GotoTop()
+		return l, nil
+	case "end":
+		l.vp.GotoBottom()
+		return l, nil
 	}
 	return l, nil
 }
@@ -268,10 +324,11 @@ func (l *Lab) resize() {
 	if vpH < 4 {
 		vpH = 4
 	}
-	if l.vp.Width == 0 && l.vp.Height == 0 {
-		l.vp = viewport.New(l.paneW(), vpH)
+	if l.vp.Width() == 0 && l.vp.Height() == 0 {
+		l.vp = viewport.New(viewport.WithWidth(l.paneW()), viewport.WithHeight(vpH))
 	} else {
-		l.vp.Width, l.vp.Height = l.paneW(), vpH
+		l.vp.SetWidth(l.paneW())
+		l.vp.SetHeight(vpH)
 	}
 	if pw := l.panelW(); pw > 0 {
 		l.panel.SetWidth(pw - 2)
@@ -312,10 +369,18 @@ func (l *Lab) paneW() int {
 }
 
 func (l *Lab) refresh() {
-	if l.vp.Width == 0 {
+	if l.vp.Width() == 0 {
 		return
 	}
 	l.vp.SetContent(l.pane())
+}
+
+// borderColor — см. chat.go.
+func (l *Lab) borderColor(focused bool) color.Color {
+	if focused {
+		return cAccent
+	}
+	return cBorder
 }
 
 func (l *Lab) frame(focused bool) lipgloss.Style {
@@ -326,9 +391,6 @@ func (l *Lab) frame(focused bool) lipgloss.Style {
 }
 
 func (l *Lab) pane() string {
-	if l.showTbl && l.res != nil {
-		return l.tableView()
-	}
 	if l.sel >= len(l.sc.Variants) {
 		return ""
 	}
@@ -392,10 +454,14 @@ func (l *Lab) pane() string {
 	return b.String()
 }
 
-func (l *Lab) tableView() string {
+func (l *Lab) summaryView() string {
+	// Цвета в стилях таблицы фиксируются при присваивании, а тема терминала
+	// приходит сообщением позже — поэтому красим при каждой отрисовке.
+	applySummaryStyles(&l.summary)
+
 	var b strings.Builder
 	b.WriteString(stTitle.Render("Сводка") + "\n\n")
-	b.WriteString(report.Table(l.res) + "\n")
+	b.WriteString(l.summary.View() + "\n\n")
 	var total float64
 	for _, a := range l.res.Attempts {
 		total += a.CostUSD
@@ -407,7 +473,7 @@ func (l *Lab) tableView() string {
 	if l.res.RunID != "" {
 		b.WriteString(stDim.Render("журнал: runs/"+l.res.RunID+".jsonl") + "\n")
 	}
-	b.WriteString("\n" + stDim.Render("t — вернуться к ответам") + "\n")
+	b.WriteString("\n" + stDim.Render("↑↓ — строка · Enter — открыть вариант · t — к ответам") + "\n")
 	return b.String()
 }
 
@@ -449,9 +515,11 @@ func (l *Lab) listView() string {
 	return b.String()
 }
 
-func (l *Lab) View() string {
+func (l *Lab) View() tea.View {
 	if !l.ready {
-		return "инициализация…"
+		v := tea.NewView("инициализация…")
+		v.AltScreen = true
+		return v
 	}
 	repeat := l.sc.Repeat
 	if l.set.Repeat > 0 {
@@ -466,38 +534,55 @@ func (l *Lab) View() string {
 	sub := stDim.Render(short(fmt.Sprintf("вариантов %d · повторов %d · %s",
 		len(l.sc.Variants), repeat, l.set.OverrideSummary()), l.w-1))
 
-	cols := []string{
-		stFrame.Width(l.listW()).Height(l.vp.Height).Render(l.listView()),
-		l.frame(l.focus == focusInput).Width(l.paneW() + 2).Render(l.vp.View()),
+	var body string
+	if l.showTbl && l.res != nil {
+		// Сводка занимает всю ширину: в три колонки таблица не влезает
+		// и обрезает правые столбцы.
+		body = l.frame(l.focus == focusInput).Width(l.w - 4).
+			Height(l.vp.Height()).Render(l.summaryView())
+	} else {
+		cols := []string{
+			stFrame.Width(l.listW()).Height(l.vp.Height()).Render(l.listView()),
+			l.frame(l.focus == focusInput).Width(l.paneW() + 2).Render(l.vp.View()),
+		}
+		if pw := l.panelW(); pw > 0 {
+			cols = append(cols, l.frame(l.focus == focusPanel).
+				Width(pw).Height(l.vp.Height()).Render(l.panel.View(l.focus == focusPanel)))
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	}
-	if pw := l.panelW(); pw > 0 {
-		cols = append(cols, l.frame(l.focus == focusPanel).
-			Width(pw).Height(l.vp.Height).Render(l.panel.View(l.focus == focusPanel)))
-	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 
 	rows := []string{head, sub, "", body}
 	if l.notesVisible() {
-		rows = append(rows, titledFrame(l.frame(l.focus == focusNotes), l.w-2,
+		rows = append(rows, titledFrame(l.frame(l.focus == focusNotes), l.borderColor(l.focus == focusNotes), l.w-2,
 			"блокнот", l.notes.View(l.focus == focusNotes)))
 	}
 
-	status := "r — прогнать · ↑↓ — вариант · t — сводка · Tab — параметры и блокнот · q — выход"
+	// Подсказка собирается из тех же привязок, по которым работают клавиши.
+	var status string
 	switch {
 	case l.busy.Load():
 		status = l.sp.View() + " прогон… " + l.cur
 	case l.panel.Editing():
-		status = "ввод значения: Enter применить · Esc отмена"
+		status = shortHelp(l.help, l.editKeys.Apply, l.editKeys.Cancel)
 	case l.focus == focusPanel:
-		status = "параметры: ↑↓ поле · ←→ значение · Enter ввести · Tab дальше · Esc к результатам"
+		status = shortHelp(l.help, l.panelKeys.Field, l.panelKeys.Value,
+			l.panelKeys.Edit, l.panelKeys.Cycle, l.panelKeys.Back)
 	case l.focus == focusNotes:
-		status = "блокнот: печатай текст · Enter — новая строка · Esc к результатам"
+		status = shortHelp(l.help, l.notesKeys.Line, l.notesKeys.Back)
 	case l.dirty:
 		status = "параметры изменены — нажми r, чтобы прогнать заново"
+	default:
+		status = shortHelp(l.help, l.keys.Run, l.keys.Variant, l.keys.Scroll,
+			l.keys.Summary, l.keys.Cycle, l.keys.Quit)
 	}
 
 	rows = append(rows, stStatus.Render(status))
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	// В v2 альт-экран и мышь — свойства вида, а не опции программы.
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 // modelLabel — какая модель реально пойдёт в запрос: переопределение из

@@ -128,3 +128,57 @@ function Hide-MousePointer {
   $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
   [void][Advent.Win]::SetCursorPos($b.Right - 1, $b.Bottom - 1)
 }
+
+function Resolve-Ffmpeg {
+  <#
+    Кладёт каталог с ffmpeg и ffprobe в PATH текущего процесса, чтобы
+    остальные скрипты вызывали их просто по имени.
+
+    Зачем вообще: ffmpeg на машине может стоять и не быть в PATH — например,
+    приехать в комплекте с другим приложением. Проверка `Get-Command ffmpeg`
+    в таком случае честно отвечает «нет», и запись падает на ровном месте,
+    хотя нужный бинарь лежит на диске. Поэтому сначала PATH, потом известные
+    места, и только если совсем пусто — просим поставить.
+
+    Дополнительный путь можно передать переменной окружения ADVENT_FFMPEG_DIR.
+  #>
+  param([switch]$Quiet)
+
+  if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and
+      (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+    return (Get-Command ffmpeg).Source
+  }
+
+  $candidates = @()
+  if ($env:ADVENT_FFMPEG_DIR) { $candidates += $env:ADVENT_FFMPEG_DIR }
+  $candidates += @(
+    # full_build от gyan.dev, приехавший вместе с ow-electron/OBS
+    (Join-Path $env:APPDATA 'ow-electron\ekmbhgikmjbagjojiebkkbgghcedofnobpajodoi\packages\jjcifboncjjhdoooodcnhnenmmfgcnmpjanimpid\0.32.55\obs\bin\64bit'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\icat\resources\bin\ffmpeg'),
+    'C:\ffmpeg\bin'
+  )
+  # winget ставит в версионированный каталог, поэтому его ищем шаблоном
+  $wingetRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+  if (Test-Path $wingetRoot) {
+    $candidates += (Get-ChildItem $wingetRoot -Directory -Filter 'Gyan.FFmpeg*' -ErrorAction SilentlyContinue |
+      ForEach-Object { Get-ChildItem $_.FullName -Directory -Recurse -Filter 'bin' -ErrorAction SilentlyContinue } |
+      Select-Object -ExpandProperty FullName)
+  }
+
+  foreach ($dir in $candidates) {
+    if (-not $dir) { continue }
+    $exe = Join-Path $dir 'ffmpeg.exe'
+    $probe = Join-Path $dir 'ffprobe.exe'
+    if ((Test-Path $exe) -and (Test-Path $probe)) {
+      $env:PATH = "$dir;$env:PATH"
+      if (-not $Quiet) { Write-Host "ffmpeg: $exe" -ForegroundColor DarkGray }
+      return $exe
+    }
+  }
+
+  throw @'
+ffmpeg не найден ни в PATH, ни в известных местах.
+Поставь: winget install Gyan.FFmpeg
+Либо укажи каталог с ffmpeg.exe и ffprobe.exe: $env:ADVENT_FFMPEG_DIR = "..."
+'@
+}

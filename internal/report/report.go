@@ -115,12 +115,12 @@ func Table(res *runner.Result) string {
 	for _, r := range rows {
 		row := []string{
 			r.Label, short(r.Model, 24), short(r.Params, 34),
-			fmt.Sprint(r.AvgMS), tokText(r),
+			fmt.Sprint(r.AvgMS), TokPerSecText(r),
 			fmt.Sprint(r.InTok), fmt.Sprint(r.OutTok),
 			fmt.Sprint(r.ReasTok), fmt.Sprintf("%.6f", r.Cost), r.Finish, r.Checks,
 		}
 		if multi {
-			row = append(row, simText(r))
+			row = append(row, SimilarityText(r))
 		}
 		data = append(data, row)
 	}
@@ -191,10 +191,10 @@ func Markdown(res *runner.Result) string {
 	b.WriteString("\n")
 	for _, r := range Rows(res) {
 		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %d | %s | %d | %d | %d | %.6f | %s | %s |",
-			r.Label, r.Model, r.Params, r.AvgMS, tokText(r),
+			r.Label, r.Model, r.Params, r.AvgMS, TokPerSecText(r),
 			r.InTok, r.OutTok, r.ReasTok, r.Cost, r.Finish, r.Checks)
 		if multi {
-			fmt.Fprintf(&b, " %s |", simText(r))
+			fmt.Fprintf(&b, " %s |", SimilarityText(r))
 		}
 		b.WriteString("\n")
 	}
@@ -284,14 +284,17 @@ func noteOf(res *runner.Result, id string) string {
 // tokText: на сверхкоротких ответах (или на заглушке) деление на почти
 // нулевую задержку даёт бессмысленные тысячи токенов в секунду — такие
 // значения не показываем.
-func tokText(r Row) string {
+// TokPerSecText — скорость генерации строкой; на сверхкоротких ответах
+// деление на почти нулевую задержку даёт бессмысленные тысячи, такое прячем.
+func TokPerSecText(r Row) string {
 	if r.AvgMS < 5 || r.OutTok == 0 {
 		return "—"
 	}
 	return fmt.Sprintf("%.1f", r.TokPerSec)
 }
 
-func simText(r Row) string {
+// SimilarityText — сходство ответов между повторами строкой.
+func SimilarityText(r Row) string {
 	if r.Empty {
 		return "—" // ответов нет: сравнивать нечего (например ожидаемая ошибка API)
 	}

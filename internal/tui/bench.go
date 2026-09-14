@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/store"

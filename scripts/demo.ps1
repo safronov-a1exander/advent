@@ -48,6 +48,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot\win.ps1"
+[void](Resolve-Ffmpeg -Quiet)
 
 if (-not (Test-Path (Join-Path $repo $OutDir))) {
   New-Item -ItemType Directory -Force -Path (Join-Path $repo $OutDir) | Out-Null

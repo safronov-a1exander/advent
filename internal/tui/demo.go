@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Демо-сценарий — простой построчный формат. Приложение само себя «нажимает»,
@@ -65,31 +65,42 @@ func ParseDemo(path string) ([]Action, error) {
 	return out, sc.Err()
 }
 
-var keyMap = map[string]tea.KeyMsg{
-	"enter":     {Type: tea.KeyEnter},
-	"esc":       {Type: tea.KeyEsc},
-	"tab":       {Type: tea.KeyTab},
-	"shift+tab": {Type: tea.KeyShiftTab},
-	"up":        {Type: tea.KeyUp},
-	"down":      {Type: tea.KeyDown},
-	"left":      {Type: tea.KeyLeft},
-	"right":     {Type: tea.KeyRight},
-	"pgup":      {Type: tea.KeyPgUp},
-	"pgdown":    {Type: tea.KeyPgDown},
-	"backspace": {Type: tea.KeyBackspace},
-	"space":     {Type: tea.KeySpace},
-	"ctrl+c":    {Type: tea.KeyCtrlC},
-	"ctrl+j":    {Type: tea.KeyCtrlJ},
-	"ctrl+l":    {Type: tea.KeyCtrlL},
-	"ctrl+r":    {Type: tea.KeyCtrlR},
-	"ctrl+e":    {Type: tea.KeyCtrlE},
-	"ctrl+n":    {Type: tea.KeyCtrlN},
-	"ctrl+p":    {Type: tea.KeyCtrlP},
-	"ctrl+t":    {Type: tea.KeyCtrlT},
-	"ctrl+o":    {Type: tea.KeyCtrlO},
-	"home":      {Type: tea.KeyHome},
-	"end":       {Type: tea.KeyEnd},
-	"delete":    {Type: tea.KeyDelete},
+// keyMap — как имя клавиши из сценария превращается в сообщение.
+//
+// В Bubble Tea v2 клавиша описывается не типом, а кодом плюс модификаторами:
+// печатный символ приходит в Code вместе с Text, служебные клавиши — только
+// кодом. Сообщение, собранное здесь, неотличимо от настоящего нажатия,
+// поэтому сценарий идёт ровно тем же путём, что и человек за клавиатурой.
+var keyMap = map[string]tea.KeyPressMsg{
+	"enter":     {Code: tea.KeyEnter},
+	"esc":       {Code: tea.KeyEsc},
+	"tab":       {Code: tea.KeyTab},
+	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
+	"up":        {Code: tea.KeyUp},
+	"down":      {Code: tea.KeyDown},
+	"left":      {Code: tea.KeyLeft},
+	"right":     {Code: tea.KeyRight},
+	"pgup":      {Code: tea.KeyPgUp},
+	"pgdown":    {Code: tea.KeyPgDown},
+	"backspace": {Code: tea.KeyBackspace},
+	"space":     {Code: tea.KeySpace, Text: " "},
+	"home":      {Code: tea.KeyHome},
+	"end":       {Code: tea.KeyEnd},
+	"delete":    {Code: tea.KeyDelete},
+	"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
+	"ctrl+e":    {Code: 'e', Mod: tea.ModCtrl},
+	"ctrl+j":    {Code: 'j', Mod: tea.ModCtrl},
+	"ctrl+l":    {Code: 'l', Mod: tea.ModCtrl},
+	"ctrl+n":    {Code: 'n', Mod: tea.ModCtrl},
+	"ctrl+o":    {Code: 'o', Mod: tea.ModCtrl},
+	"ctrl+p":    {Code: 'p', Mod: tea.ModCtrl},
+	"ctrl+r":    {Code: 'r', Mod: tea.ModCtrl},
+	"ctrl+t":    {Code: 't', Mod: tea.ModCtrl},
+}
+
+// typeKey — сообщение о нажатии печатного символа.
+func typeKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 // Idler — то, у чего драйвер спрашивает, занят ли экран.
@@ -114,14 +125,17 @@ func RunDemo(p *tea.Program, idle Idler, acts []Action) {
 
 		case "type":
 			for _, r := range a.arg {
-				p.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+				p.Send(typeKey(r))
 				time.Sleep(typeDelay)
 			}
 
 		case "key":
 			k, ok := keyMap[strings.ToLower(a.arg)]
 			if !ok {
-				p.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(a.arg)})
+				// не служебная клавиша — печатаем как текст
+				for _, r := range a.arg {
+					p.Send(typeKey(r))
+				}
 				continue
 			}
 			p.Send(k)
@@ -130,7 +144,7 @@ func RunDemo(p *tea.Program, idle Idler, acts []Action) {
 			waitIdle(idle, a.dur)
 
 		case "quit":
-			p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+			p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			return
 		}
 	}

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Notes — блокнот под окном диалога.
@@ -92,14 +92,16 @@ func (n *Notes) Tick() tea.Cmd {
 
 // Key обрабатывает клавишу, когда фокус на блокноте.
 // Во время автонабора ручной ввод игнорируется, чтобы строки не смешивались.
-func (n *Notes) Key(msg tea.KeyMsg) bool {
+func (n *Notes) Key(msg tea.KeyPressMsg) bool {
 	if n.typing {
 		return true
 	}
-	switch msg.Type {
-	case tea.KeyRunes:
-		n.current += string(msg.Runes)
+	// В v2 печатный символ приходит в Text; служебные клавиши — только кодом.
+	if msg.Text != "" {
+		n.current += msg.Text
 		return true
+	}
+	switch msg.Code {
 	case tea.KeySpace:
 		n.current += " "
 		return true

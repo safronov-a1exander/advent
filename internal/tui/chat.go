@@ -8,38 +8,20 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/store"
-)
-
-// ---- стили ----
-
-var (
-	cBorder = lipgloss.AdaptiveColor{Light: "#c8ccd4", Dark: "#3b4048"}
-	cAccent = lipgloss.AdaptiveColor{Light: "#0b6bcb", Dark: "#7aa2f7"}
-	cUser   = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#9ece6a"}
-	cDim    = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#7f8694"}
-	cErr    = lipgloss.AdaptiveColor{Light: "#b42318", Dark: "#f7768e"}
-
-	stTitle  = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
-	stUser   = lipgloss.NewStyle().Bold(true).Foreground(cUser)
-	stBot    = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
-	stDim    = lipgloss.NewStyle().Foreground(cDim)
-	stErr    = lipgloss.NewStyle().Foreground(cErr)
-	stFrame  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cBorder)
-	stFocus  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent)
-	stStatus = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
-	stNote   = lipgloss.NewStyle().Foreground(cAccent).Italic(true)
 )
 
 // ---- сообщения ----
@@ -111,10 +93,18 @@ type Model struct {
 	vp        viewport.Model
 	ta        textarea.Model
 	sp        spinner.Model
+	help      help.Model
+	keys      chatKeys
+	panelKeys panelKeys
+	editKeys  editKeys
+	notesKeys notesKeys
 	ready     bool
 	w, h      int
 	focus     focusTarget
 	showPanel bool
+	// follow: вьюпорт сам прокручивается к новым строкам. Сбрасывается,
+	// когда читатель отлистал вверх, и возвращается на низу.
+	follow bool
 
 	// history хранит только реплики user/assistant. Системный промпт
 	// подставляется из настроек в момент отправки — поэтому его правка
@@ -146,18 +136,35 @@ func NewModel(o Options) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(cAccent)
 
-	m := &Model{opts: o, set: o.Settings, ta: ta, sp: sp, showPanel: true}
+	m := &Model{
+		opts: o, set: o.Settings, ta: ta, sp: sp, showPanel: true,
+		follow:    true,
+		help:      newHelp(),
+		keys:      newChatKeys(len(o.Settings.Catalog) > 1),
+		panelKeys: newPanelKeys("в диалог"),
+		editKeys:  newEditKeys(),
+		notesKeys: newNotesKeys("вернуться в диалог"),
+	}
 	m.panel = NewPanel(m.set.Fields(), 34)
 	m.notes = NewNotes(60, notesHeight)
 	return m
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, m.sp.Tick) }
+func (m *Model) Init() tea.Cmd {
+	// Спрашиваем у терминала цвет фона: в lipgloss v2 нет AdaptiveColor,
+	// тему приложение выбирает само (см. theme.go).
+	return tea.Batch(tea.RequestBackgroundColor, m.sp.Tick)
+}
 
 // Busy сообщает демо-драйверу, ждать ли ответ.
 func (m *Model) Busy() bool { return m.busy.Load() }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if themeFromMsg(msg) {
+		m.refresh()
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -165,7 +172,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
 	case NoteMsg:
@@ -237,6 +244,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finish(msg.resp, msg.err)
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		m.follow = m.vp.AtBottom()
+		return m, cmd
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.sp, cmd = m.sp.Update(msg)
@@ -248,7 +261,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Ctrl+C работает всегда, даже посреди редактирования поля.
 	if msg.String() == "ctrl+c" {
 		if m.cancel != nil {
@@ -340,13 +353,24 @@ func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ta.Reset()
+		m.follow = true
 		return m, m.send(text)
 	case "ctrl+j":
 		m.ta.InsertString("\n")
 		return m, nil
+	case "end":
+		m.vp.GotoBottom()
+		m.follow = true
+		return m, nil
+	case "home":
+		m.vp.GotoTop()
+		m.follow = false
+		return m, nil
 	case "pgup", "pgdown", "shift+up", "shift+down":
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
+		// Вернулись к низу — снова следуем за новыми строками.
+		m.follow = m.vp.AtBottom()
 		return m, cmd
 	}
 
@@ -599,9 +623,10 @@ func (m *Model) layout() {
 		bodyW = 20
 	}
 	if !m.ready {
-		m.vp = viewport.New(bodyW, vpH)
+		m.vp = viewport.New(viewport.WithWidth(bodyW), viewport.WithHeight(vpH))
 	} else {
-		m.vp.Width, m.vp.Height = bodyW, vpH
+		m.vp.SetWidth(bodyW)
+		m.vp.SetHeight(vpH)
 	}
 	m.ta.SetWidth(m.w - 4)
 	m.notes.SetSize(m.w-4, notesHeight)
@@ -613,7 +638,7 @@ func (m *Model) refresh() {
 	if p := m.partial.String(); p != "" {
 		body += "\n" + p
 	}
-	w := m.vp.Width - 2
+	w := m.vp.Width() - 2
 	if w < 20 {
 		w = 20
 	}
@@ -621,9 +646,11 @@ func (m *Model) refresh() {
 	m.vp.GotoBottom()
 }
 
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
 	if !m.ready {
-		return "инициализация…"
+		v := tea.NewView("инициализация…")
+		v.AltScreen = true
+		return v
 	}
 	title := m.opts.Title
 	if title == "" {
@@ -632,7 +659,7 @@ func (m *Model) View() string {
 	header := stTitle.Render(title) + "  " +
 		stDim.Render(fmt.Sprintf("%s / %s", m.opts.Provider, m.set.Model))
 
-	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width + 2).Render(m.vp.View())
+	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width() + 2).Render(m.vp.View())
 	body := transcript
 	if pw := m.panelW(); pw > 0 {
 		// Рамка панели по высоте содержимого, а не во весь экран: параметров
@@ -644,13 +671,26 @@ func (m *Model) View() string {
 
 	rows := []string{header, "", body}
 	if m.notesVisible() {
-		rows = append(rows, titledFrame(m.frame(m.focus == focusNotes), m.w-2,
+		rows = append(rows, titledFrame(m.frame(m.focus == focusNotes), m.borderColor(m.focus == focusNotes), m.w-2,
 			"блокнот", m.notes.View(m.focus == focusNotes)))
 	}
 	rows = append(rows,
 		m.frame(m.focus == focusInput).Width(m.w-2).Render(m.ta.View()),
 		stStatus.Render(m.status()))
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	// В v2 альт-экран и мышь — свойства вида, а не опции программы.
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// borderColor — цвет рамки под текущий фокус; нужен titledFrame,
+// который рисует верхнюю границу сам.
+func (m *Model) borderColor(focused bool) color.Color {
+	if focused {
+		return cAccent
+	}
+	return cBorder
 }
 
 func (m *Model) frame(focused bool) lipgloss.Style {
@@ -661,16 +701,27 @@ func (m *Model) frame(focused bool) lipgloss.Style {
 }
 
 func (m *Model) status() string {
-	left := "Enter отправить · Tab параметры и блокнот · Ctrl+E все модели · Ctrl+R сброс · Ctrl+C выход"
+	// Подсказка собирается из тех же привязок, по которым работают клавиши,
+	// поэтому не может разойтись с поведением (см. keys.go).
+	var left string
 	switch {
 	case m.busy.Load():
 		left = m.sp.View() + " ждём ответ…"
 	case m.panel.Editing():
-		left = "ввод значения: Enter применить · Esc отмена"
+		left = shortHelp(m.help, m.editKeys.Apply, m.editKeys.Cancel)
 	case m.focus == focusPanel:
-		left = "параметры: ↑↓ поле · ←→ значение · Enter ввести · Tab дальше · Esc в диалог"
+		left = shortHelp(m.help, m.panelKeys.Field, m.panelKeys.Value,
+			m.panelKeys.Edit, m.panelKeys.Cycle, m.panelKeys.Back)
 	case m.focus == focusNotes:
-		left = "блокнот: печатай текст · Enter — новая строка · Esc вернуться в диалог"
+		left = shortHelp(m.help, m.notesKeys.Line, m.notesKeys.Back)
+	default:
+		left = shortHelp(m.help, m.keys.Send, m.keys.Scroll, m.keys.Cycle,
+			m.keys.Bench, m.keys.Reset, m.keys.Quit)
+	}
+	// Пока читатель отлистан вверх, новые строки уходят вниз незаметно —
+	// подсказываем, чем вернуться.
+	if !m.follow {
+		left = stNote.Render("↑ отлистано, End — к последнему ответу") + "  " + left
 	}
 	right := fmt.Sprintf("вызовов %d · токенов %d↑ %d↓ · $%.6f",
 		m.tot.calls, m.tot.prompt, m.tot.completion, m.tot.cost)
