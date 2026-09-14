@@ -22,6 +22,7 @@ type chatKeys struct {
 	Spawn   key.Binding
 	Switch  key.Binding
 	Debug   key.Binding
+	Tokens  key.Binding
 	Bench   key.Binding
 	Reset   key.Binding
 	Clear   key.Binding
@@ -76,6 +77,7 @@ func newChatKeys(withBench bool) chatKeys {
 		Spawn:  key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый агент")),
 		Switch: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("Ctrl+O", "агенты")),
 		Debug:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl+D", "внутри агента")),
+		Tokens: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("Ctrl+T", "токены")),
 		Bench:  key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
 		Reset:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
 		Clear:  key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),

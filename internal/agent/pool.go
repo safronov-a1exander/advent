@@ -173,6 +173,8 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			cfg:      snap.Config.Clone(),
 			history:  append([]llm.Message(nil), snap.History...),
 			stats:    snap.Stats,
+			turns:    append([]Turn(nil), snap.Turns...),
+			calib:    snap.Calibration,
 			created:  snap.Created,
 			updated:  snap.Updated,
 			rev:      snap.Rev,

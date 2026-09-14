@@ -41,6 +41,10 @@ type Snapshot struct {
 	Config   Config        `json:"config"`
 	History  []llm.Message `json:"history"`
 	Stats    Stats         `json:"stats"`
+	// Turns и Calibration появились на восьмом дне. Поля добавочные:
+	// старые файлы читаются как есть, просто без учёта по ходам.
+	Turns       []Turn  `json:"turns,omitempty"`
+	Calibration float64 `json:"calibration,omitempty"`
 }
 
 // Store — куда пул сохраняет агентов.
@@ -69,6 +73,9 @@ func (a *Agent) snapshot() Snapshot {
 		Config:   a.cfg.Clone(),
 		History:  append([]llm.Message(nil), a.history...),
 		Stats:    a.stats,
+
+		Turns:       append([]Turn(nil), a.turns...),
+		Calibration: a.calib,
 	}
 }
 

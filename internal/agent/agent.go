@@ -130,6 +130,8 @@ type Agent struct {
 	cfg     Config
 	history []llm.Message // только user/assistant; system подставляется при отправке
 	stats   Stats
+	turns   []Turn  // расход по ходам текущего разговора (день 8)
+	calib   float64 // во сколько раз факт провайдера больше сырой оценки; 0 — ещё не знаем
 	created time.Time
 	updated time.Time
 	// rev растёт при каждом изменении, которое стоит сохранить. По нему
@@ -205,6 +207,7 @@ func (a *Agent) Stats() Stats {
 func (a *Agent) Reset() {
 	a.mu.Lock()
 	a.history = nil
+	a.turns = nil // учёт ходов — про разговор; калибровка — про модель, её не трогаем
 	a.gen++
 	a.touch()
 	a.mu.Unlock()
@@ -280,7 +283,19 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	cfg := a.cfg.Clone()
 	hist := append([]llm.Message(nil), a.history...)
 	gen := a.gen
+	turn := Turn{
+		At:        time.Now(),
+		Question:  a.calibrated(rawEstimate(text)),
+		Estimated: a.calibrated(rawEstimateMessages(compose(cfg.System, hist, text))),
+	}
 	a.mu.Unlock()
+
+	// Свой лимит контекста агента проверяется до отправки: запрос, который
+	// заведомо не влезет, не должен тратить ни токенов, ни времени. История
+	// не меняется — разговор можно сбросить или продолжить в новом агенте.
+	if limit := cfg.limit(); limit > 0 && turn.Estimated > limit {
+		return nil, &ErrContextOverflow{Estimated: turn.Estimated, Limit: limit}
+	}
 
 	chain := Chain(cfg.Strategy)
 	prev := map[string]string{}
@@ -311,6 +326,17 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		}
 		reply.Steps = append(reply.Steps, Step{Label: st.Label, Response: resp})
 
+		// Факт провайдера уточняет оценку: следующая проверка лимита
+		// и следующий вопрос посчитаются уже по этой модели.
+		a.mu.Lock()
+		a.learn(rawEstimateMessages(req.Messages), resp.Usage.PromptTokens)
+		a.mu.Unlock()
+		turn.Calls++
+		turn.Prompt += resp.Usage.PromptTokens
+		turn.Completion += resp.Usage.CompletionTokens
+		turn.Reasoning += resp.Usage.ReasoningTokens
+		turn.Cached += resp.Usage.CachedPromptTokens
+
 		if !st.Final {
 			if st.Capture != "" {
 				prev[st.Capture] = resp.Content
@@ -327,6 +353,9 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		a.history = append(a.history,
 			llm.Message{Role: llm.RoleUser, Content: text},
 			llm.Message{Role: llm.RoleAssistant, Content: reply.Final.Content})
+		// ход без сброса попадает в учёт; начатый до сброса относится
+		// к стёртому разговору, и его рост токенов уже ни о чём не говорит
+		a.turns = append(a.turns, turn)
 	}
 	a.stats.Turns++
 	a.touch()

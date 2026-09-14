@@ -35,6 +35,11 @@ type Config struct {
 	MaxTokens      *int     `yaml:"max_tokens" json:"max_tokens,omitempty"`
 	Stop           []string `yaml:"stop" json:"stop,omitempty"`
 	ResponseFormat string   `yaml:"response_format" json:"response_format,omitempty"`
+
+	// ContextLimit — собственный лимит контекста агента в токенах, меньше
+	// окна модели. Запрос, который по оценке не влезает, не отправляется.
+	// nil — ограничивает только окно модели на стороне провайдера.
+	ContextLimit *int `yaml:"context_limit" json:"context_limit,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -55,6 +60,9 @@ func (c Config) Clone() Config {
 	}
 	if c.Stop != nil {
 		out.Stop = append([]string(nil), c.Stop...)
+	}
+	if c.ContextLimit != nil {
+		out.ContextLimit = llm.I(*c.ContextLimit)
 	}
 	return out
 }
@@ -122,6 +130,9 @@ func (c Config) Summary() string {
 	if c.ResponseFormat != "" {
 		parts = append(parts, "fmt="+c.ResponseFormat)
 	}
+	if c.ContextLimit != nil {
+		parts = append(parts, fmt.Sprintf("ctx≤%d", *c.ContextLimit))
+	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
 	}
@@ -173,6 +184,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.ResponseFormat != "" {
 		out.ResponseFormat = top.ResponseFormat
+	}
+	if top.ContextLimit != nil {
+		out.ContextLimit = llm.I(*top.ContextLimit)
 	}
 	return out
 }
