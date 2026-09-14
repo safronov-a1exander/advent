@@ -57,8 +57,8 @@ func (m *Model) tokenLine(reply *agent.Reply) string {
 		if t.Calls > 1 {
 			parts = append(parts, fmt.Sprintf("вызовов %d", t.Calls))
 		}
-		if t.CompressCalls > 0 {
-			parts = append(parts, fmt.Sprintf("+сжатие %d→%d", t.CompressPrompt, t.CompressCompletion))
+		if t.AuxCalls > 0 {
+			parts = append(parts, fmt.Sprintf("+служебные %d→%d", t.AuxPrompt, t.AuxCompletion))
 		}
 	} else {
 		// ответ, начатый до сброса, в учёт не попал — показываем голый usage
@@ -129,13 +129,13 @@ func (m *Model) dumpTokens() {
 		}
 	}
 	const barW = 24
-	head := fmt.Sprintf("  %-3s %7s %8s %8s %7s %7s %8s %8s  %s", "ход", "вопрос~", "sys+ист", "запрос", "ответ", "сжатие", "оценка", "итого", "рост запроса")
+	head := fmt.Sprintf("  %-3s %7s %8s %8s %7s %7s %8s %8s  %s", "ход", "вопрос~", "sys+ист", "запрос", "ответ", "служеб", "оценка", "итого", "рост запроса")
 	m.pushLine(stDim.Render(head))
 	total, compressTotal := 0, 0
 	for i, t := range turns {
-		compress := t.CompressPrompt + t.CompressCompletion
+		compress := t.AuxPrompt + t.AuxCompletion
 		compressTotal += compress
-		// итого — вместе со служебными вызовами сжатия: они тоже расход
+		// итого — вместе со служебными вызовами (сводка, факты): они тоже расход
 		total += t.Prompt + t.Completion + compress
 		bar := strings.Repeat("█", max(1, t.Prompt*barW/max(maxPrompt, 1)))
 		compressCell := "—"
@@ -147,7 +147,8 @@ func (m *Model) dumpTokens() {
 			estError(t.Estimated, t.Prompt), total, stNote.Render(bar)))
 	}
 	if compressTotal > 0 {
-		m.pushLine(stDim.Render(fmt.Sprintf("  из них на сжатие истории — %d токенов служебных вызовов", compressTotal)))
+		m.pushLine(stDim.Render(fmt.Sprintf("  из них служебные вызовы (%s) — %d токенов",
+			agent.ContextLabel(m.ag.Config().Context), compressTotal)))
 	}
 
 	first, last := turns[0], turns[len(turns)-1]

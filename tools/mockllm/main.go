@@ -112,6 +112,8 @@ func main() {
 		var source []string
 		var sep string
 		switch {
+		case factsRequest(req.Messages):
+			source, sep = []string{mockFacts(req.Messages)}, ""
 		case wantJSON:
 			source, sep = chunkJSON(sampleJSON), ""
 		case recallQuestion(req.Messages):
@@ -227,6 +229,35 @@ func main() {
 // ответ честно будет «не знаю». Так на репетиции проверяется ровно то,
 // что проверяется на живом API: память живёт у агента, а не у модели.
 var nameRe = regexp.MustCompile(`(?i)меня зовут\s+([\p{L}-]+)`)
+
+// factsRequest — служебный запрос sticky facts от агента (день 10).
+func factsRequest(msgs []message) bool {
+	return len(msgs) >= 2 && strings.HasPrefix(msgs[0].Content, "Ты ведёшь блок ключевых фактов")
+}
+
+// mockFacts — обновление фактов без модели: прежние факты остаются,
+// имя из «меня зовут» становится фактом, а сама реплика — фактом
+// «реплика-N». Этого хватает, чтобы на репетиции прошёл весь путь:
+// служебный вызов, JSON, блок фактов в следующем запросе.
+func mockFacts(msgs []message) string {
+	body := msgs[1].Content
+	facts := map[string]string{}
+	if _, cur, ok := strings.Cut(body, "Текущие факты:\n"); ok {
+		cur, _, _ = strings.Cut(cur, "\n\n")
+		_ = json.Unmarshal([]byte(cur), &facts)
+	}
+	_, msg, _ := strings.Cut(body, "Новое сообщение пользователя:\n")
+	if m := nameRe.FindStringSubmatch(msg); m != nil {
+		facts["имя"] = m[1]
+	} else if s := strings.Join(strings.Fields(msg), " "); s != "" {
+		if r := []rune(s); len(r) > 60 {
+			s = string(r[:60]) + "…"
+		}
+		facts[fmt.Sprintf("реплика-%d", len(facts)+1)] = s
+	}
+	b, _ := json.Marshal(map[string]any{"facts": facts})
+	return string(b)
+}
 
 func recallQuestion(msgs []message) bool {
 	last := lastUser(msgs)

@@ -182,6 +182,12 @@ func (p *Pool) Restore() ([]*Agent, error) {
 		if snap.Summary != nil {
 			a.summary = *snap.Summary
 		}
+		a.facts = append([]Fact(nil), snap.Facts...)
+		a.branch = snap.Branch
+		a.parked = cloneThreads(snap.Parked)
+		a.checkpoints = cloneCheckpoints(snap.Checkpoints)
+		a.branchOrder = append([]string(nil), snap.BranchOrder...)
+		a.branchFrom = cloneStrings(snap.BranchFrom)
 		a.saved.Store(true)
 		p.wire(a)
 		out = append(out, a)

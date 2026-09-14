@@ -2,6 +2,7 @@ package main
 
 // Дни 9–10 — сравнение стратегий контекста на одном диалоге.
 //   advent dialog -scenario scenarios/day09-compression.yaml
+//   advent dialog -scenario scenarios/day10-strategies.yaml
 //
 // Каждый вариант проходит один и тот же разговор отдельным агентом.
 // В консоль — итоги и рост запроса по ходам, в reports/ — отчёт
@@ -93,22 +94,28 @@ func cmdDialog(ctx context.Context, args []string) error {
 
 func printDialogTotals(res []dialog.Result) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ВАРИАНТ\tВХОД ВСЕГО\tИЗ КЭША\tНА СЖАТИЕ\tВЫХОД\tСЖАТИЙ\tПАМЯТЬ\t$")
+	fmt.Fprintln(w, "ВАРИАНТ\tКОНТЕКСТ\tВХОД ВСЕГО\tИЗ КЭША\tСЛУЖЕБНЫЕ\tВЫХОД\tСЛУЖ. ВЫЗОВОВ\tПАМЯТЬ\t$")
 	for _, r := range res {
 		t := r.Totals()
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d/%d\t%.6f\n",
-			r.Variant.Name, t.Input(), t.Cached, t.CompressPrompt, t.Output(),
-			t.CompressCalls, t.Passed, t.Checks, t.Cost)
+		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d/%d\t%.6f\n",
+			r.Variant.Name, dialog.VariantLabel(r), t.Input(), t.Cached, t.AuxPrompt, t.Output(),
+			t.AuxCalls, t.Passed, t.Checks, t.Cost)
 	}
 	w.Flush()
-	if len(res) >= 2 {
-		base, other := res[0].Totals(), res[1].Totals()
-		if base.Input() > 0 {
-			fmt.Printf("\n%s против %s: вход %+d%%, из кэша %d против %d, память %d/%d против %d/%d\n",
-				res[1].Variant.Name, res[0].Variant.Name,
-				(other.Input()-base.Input())*100/base.Input(), other.Cached, base.Cached,
-				other.Passed, other.Checks, base.Passed, base.Checks)
-		}
+	if len(res) < 2 {
+		return
+	}
+	base := res[0].Totals()
+	if base.Input() == 0 {
+		return
+	}
+	fmt.Println()
+	for _, r := range res[1:] {
+		other := r.Totals()
+		fmt.Printf("%s против %s: вход %+d%%, из кэша %d против %d, память %d/%d против %d/%d\n",
+			r.Variant.Name, res[0].Variant.Name,
+			(other.Input()-base.Input())*100/base.Input(), other.Cached, base.Cached,
+			other.Passed, other.Checks, base.Passed, base.Checks)
 	}
 }
 
@@ -122,26 +129,14 @@ func printDialogGrowth(s *dialog.Scenario, res []dialog.Result) {
 	}
 	fmt.Fprintln(w, head)
 	for i, l := range s.Dialog {
-		row := fmt.Sprintf("%d\t%s", i+1, cut(strings.Join(strings.Fields(l.Say), " "), 44))
+		row := fmt.Sprintf("%d\t%s", i+1, cut(l.Text(), 44))
 		for _, r := range res {
 			cellText := "—"
 			if i < len(r.Steps) {
 				st := r.Steps[i]
-				switch {
-				case st.Err != "":
-					cellText = "ошибка"
-				default:
-					cellText = fmt.Sprintf("%5d", st.Turn.Prompt)
-					if st.Turn.CompressCalls > 0 {
-						cellText += fmt.Sprintf(" +сжатие %d", st.Turn.CompressPrompt)
-					}
-					if st.Checked {
-						if st.Passed {
-							cellText += " ✓"
-						} else {
-							cellText += " ✗ " + strings.Join(st.Missing, ",")
-						}
-					}
+				cellText = st.Brief(false)
+				if st.Checked && !st.Passed && st.Err == "" {
+					cellText += " " + strings.Join(st.Missing, ",")
 				}
 			}
 			row += "\t" + cellText

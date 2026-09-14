@@ -13,20 +13,21 @@ import (
 // и её описание, а строку подсказки печатает help.Model.
 
 type chatKeys struct {
-	Send    key.Binding
-	Newline key.Binding
-	Scroll  key.Binding
-	Cycle   key.Binding
-	Back    key.Binding
-	Panel   key.Binding
-	Spawn   key.Binding
-	Switch  key.Binding
-	Debug   key.Binding
-	Tokens  key.Binding
-	Bench   key.Binding
-	Reset   key.Binding
-	Clear   key.Binding
-	Quit    key.Binding
+	Send     key.Binding
+	Newline  key.Binding
+	Scroll   key.Binding
+	Cycle    key.Binding
+	Back     key.Binding
+	Panel    key.Binding
+	Spawn    key.Binding
+	Switch   key.Binding
+	Branches key.Binding
+	Debug    key.Binding
+	Tokens   key.Binding
+	Bench    key.Binding
+	Reset    key.Binding
+	Clear    key.Binding
+	Quit     key.Binding
 }
 
 type panelKeys struct {
@@ -55,6 +56,22 @@ type agentKeys struct {
 	Back  key.Binding
 }
 
+type branchKeys struct {
+	Move       key.Binding
+	Open       key.Binding
+	Checkpoint key.Binding
+	Back       key.Binding
+}
+
+func newBranchKeys() branchKeys {
+	return branchKeys{
+		Move:       key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "выбор")),
+		Open:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "в ветку / ветка от чекпойнта")),
+		Checkpoint: key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("Ctrl+S", "чекпойнт здесь")),
+		Back:       key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
+	}
+}
+
 type labKeys struct {
 	Run     key.Binding
 	Scroll  key.Binding
@@ -71,17 +88,18 @@ func newChatKeys(withBench bool) chatKeys {
 		Newline: key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("Ctrl+J", "перенос")),
 		Scroll: key.NewBinding(key.WithKeys("pgup", "pgdown", "shift+up", "shift+down"),
 			key.WithHelp("PgUp/PgDn", "прокрутка")),
-		Cycle:  key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
-		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
-		Panel:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
-		Spawn:  key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый агент")),
-		Switch: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("Ctrl+O", "агенты")),
-		Debug:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl+D", "внутри агента")),
-		Tokens: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("Ctrl+T", "токены")),
-		Bench:  key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
-		Reset:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
-		Clear:  key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
-		Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
+		Cycle:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "параметры и блокнот")),
+		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
+		Panel:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("Ctrl+P", "панель")),
+		Spawn:    key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый агент")),
+		Switch:   key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("Ctrl+O", "агенты")),
+		Branches: key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("Ctrl+B", "ветки")),
+		Debug:    key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl+D", "внутри агента")),
+		Tokens:   key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("Ctrl+T", "токены")),
+		Bench:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),
+		Reset:    key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl+R", "сброс")),
+		Clear:    key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("Ctrl+L", "очистить")),
+		Quit:     key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl+C", "выход")),
 	}
 	// Сравнение моделей появляется только там, где оно реализовано:
 	// подсказка не должна обещать клавишу, которой нет.

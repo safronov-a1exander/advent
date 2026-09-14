@@ -253,7 +253,7 @@ func (s *Settings) Fields() []Field {
 		ctx.HintFn = func() string { return agent.ContextHint(s.Context) }
 		f = append(f, ctx,
 			IntField("хвост как есть",
-				"сколько последних сообщений идёт в запрос без сжатия (для summary); пусто — 4",
+				"сколько последних сообщений идёт в запрос как есть (window, facts, summary); пусто — 4",
 				func() *int { return s.KeepLast },
 				func(v *int) { s.KeepLast = v },
 				2, 0, 100, 4),

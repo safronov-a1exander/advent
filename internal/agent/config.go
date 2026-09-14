@@ -146,8 +146,13 @@ func (c Config) Summary() string {
 	if c.ContextLimit != nil {
 		parts = append(parts, fmt.Sprintf("ctx≤%d", *c.ContextLimit))
 	}
-	if c.Context == ContextSummary {
+	switch c.Context {
+	case ContextSummary:
 		parts = append(parts, fmt.Sprintf("summary: хвост %d, сжатие каждые %d", c.keepLast(), c.summarizeEvery()))
+	case ContextWindow:
+		parts = append(parts, fmt.Sprintf("window: последние %d", c.keepLast()))
+	case ContextFacts:
+		parts = append(parts, fmt.Sprintf("facts + последние %d", c.keepLast()))
 	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")

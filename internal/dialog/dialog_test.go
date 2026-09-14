@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -50,9 +51,9 @@ func (e *echoLLM) Chat(_ context.Context, r llm.Request) (*llm.Response, error) 
 func TestRunComparesVariants(t *testing.T) {
 	s := &Scenario{
 		Defaults: agent.Config{Tier: "weak", System: "ассистент"},
-		Variants: []agent.Config{
-			{Name: "полная"},
-			{Name: "сжатие", Context: agent.ContextSummary, KeepLast: llm.I(2), SummarizeEvery: llm.I(2)},
+		Variants: []Variant{
+			{Config: agent.Config{Name: "полная"}},
+			{Config: agent.Config{Name: "сжатие", Context: agent.ContextSummary, KeepLast: llm.I(2), SummarizeEvery: llm.I(2)}},
 		},
 		Dialog: []Line{
 			{Say: "меня зовут Саша"},
@@ -87,8 +88,8 @@ func TestRunComparesVariants(t *testing.T) {
 	if sum.Passed != 2 {
 		t.Fatalf("со сжатием пройдено %d из %d: %+v", sum.Passed, sum.Checks, res[1].Steps[5])
 	}
-	if sum.CompressCalls == 0 || full.CompressCalls != 0 {
-		t.Fatalf("вызовы сжатия: полная %d, summary %d", full.CompressCalls, sum.CompressCalls)
+	if sum.AuxCalls == 0 || full.AuxCalls != 0 {
+		t.Fatalf("вызовы сжатия: полная %d, summary %d", full.AuxCalls, sum.AuxCalls)
 	}
 	// последний запрос со сжатием меньше, чем у полной истории
 	lastFull := res[0].Steps[6].Turn
@@ -100,8 +101,72 @@ func TestRunComparesVariants(t *testing.T) {
 		t.Fatal("к концу разговора у варианта со сжатием нет сводки")
 	}
 	// в итог сжатия входят и служебные вызовы
-	if sum.Input() != sum.Prompt+sum.CompressPrompt || sum.CompressPrompt == 0 {
+	if sum.Input() != sum.Prompt+sum.AuxPrompt || sum.AuxPrompt == 0 {
 		t.Fatalf("входные токены сжатия не учтены: %+v", sum)
+	}
+}
+
+func TestBranchCommands(t *testing.T) {
+	s := &Scenario{
+		Defaults: agent.Config{Tier: "weak"},
+		Variants: []Variant{
+			{Config: agent.Config{Name: "лента"}},
+			{Config: agent.Config{Name: "ветки"}, Branches: true},
+		},
+		Dialog: []Line{
+			{Say: "общее"},
+			{Checkpoint: "развилка"},
+			{Branch: "А", From: "развилка"},
+			{Say: "только в А"},
+			{Branch: "Б", From: "развилка"},
+			{Say: "что известно?", Expect: []string{"общее"}},
+			{Switch: "А"},
+			{Say: "а тут?", Expect: []string{"только в А"}},
+		},
+	}
+	pool := agent.NewPool(&echoLLM{}, "echo", nil)
+	res, err := Run(context.Background(), pool, []llm.ModelInfo{{ID: "m", Tier: "weak"}}, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, br := res[0], res[1]
+	if !strings.Contains(line.Steps[1].Command, "пропущено") || line.Steps[3].Branch != agent.MainBranch {
+		t.Fatalf("вариант без веток: %+v", line.Steps[1])
+	}
+	for _, i := range []int{1, 2, 4, 6} {
+		if br.Steps[i].Err != "" {
+			t.Fatalf("команда %q: %s", br.Steps[i].Command, br.Steps[i].Err)
+		}
+	}
+	// в ветке Б нет реплики из А — эхо-провайдер вернул бы её
+	if b := br.Steps[5]; b.Branch != "Б" || strings.Contains(b.Answer, "только в А") {
+		t.Fatalf("ветка Б: %+v", b)
+	}
+	if a := br.Steps[7]; a.Branch != "А" || !a.Passed {
+		t.Fatalf("после возврата в А: %+v", a)
+	}
+	if tt := br.Totals(); tt.Checks != 2 || tt.Errors != 0 {
+		t.Fatalf("итоги веток: %+v", tt)
+	}
+}
+
+func TestLoadVariantWithBranches(t *testing.T) {
+	path := t.TempDir() + "/s.yaml"
+	body := "variants:\n  - name: ветки\n    context: facts\n    branches: true\ndialog:\n  - say: привет\n  - checkpoint: x\n  - branch: y\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "from") {
+		t.Fatalf("branch без from: %v", err)
+	}
+	body = strings.Replace(body, "branch: y\n", "branch: y\n    from: x\n", 1)
+	_ = os.WriteFile(path, []byte(body), 0o644)
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := s.Variants[0]; !v.Branches || v.Context != agent.ContextFacts || v.Name != "ветки" {
+		t.Fatalf("вариант: %+v", v)
 	}
 }
 

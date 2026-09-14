@@ -65,16 +65,16 @@ type Turn struct {
 	// Estimated — какой запрос агент насчитал до отправки; рядом с Prompt
 	// показывает ошибку оценки.
 	Estimated int `json:"prompt_est"`
-	// Compress* — служебный вызов сжатия истории на этом ходе (день 9).
-	// Считается отдельно: сжатие само стоит токенов, и без этого сравнение
-	// «со сжатием дешевле» было бы нечестным.
 	// Sent — сколько сообщений истории ушло в запрос вместе с вопросом:
-	// у полной истории это вся история, у summary — только хвост.
+	// у полной истории это вся история, у summary и окна — только хвост.
 	Sent int `json:"sent_messages,omitempty"`
 
-	CompressCalls      int `json:"compress_calls,omitempty"`
-	CompressPrompt     int `json:"compress_prompt_tokens,omitempty"`
-	CompressCompletion int `json:"compress_completion_tokens,omitempty"`
+	// Aux* — служебные вызовы стратегии контекста на этом ходе: сжатие
+	// истории (день 9), обновление фактов (день 10). Считаются отдельно:
+	// они сами стоят токенов, и без них сравнение стратегий было бы нечестным.
+	AuxCalls      int `json:"aux_calls,omitempty"`
+	AuxPrompt     int `json:"aux_prompt_tokens,omitempty"`
+	AuxCompletion int `json:"aux_completion_tokens,omitempty"`
 }
 
 // History — токены запроса без нового вопроса: system и прошлые реплики.
@@ -139,7 +139,7 @@ func (a *Agent) Estimate(text string) int {
 func (a *Agent) Context(text string) ContextUsage {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	system, past := window(a.cfg, a.history, a.summary)
+	system, past := window(a.cfg, a.history, a.summary, a.facts)
 	msgs := compose(system, past, text)
 	return ContextUsage{Estimated: a.calibrated(rawEstimateMessages(msgs)), Limit: a.cfg.limit()}
 }
