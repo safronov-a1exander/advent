@@ -179,6 +179,9 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			updated:  snap.Updated,
 			rev:      snap.Rev,
 		}
+		if snap.Summary != nil {
+			a.summary = *snap.Summary
+		}
 		a.saved.Store(true)
 		p.wire(a)
 		out = append(out, a)

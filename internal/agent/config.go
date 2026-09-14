@@ -40,6 +40,13 @@ type Config struct {
 	// окна модели. Запрос, который по оценке не влезает, не отправляется.
 	// nil — ограничивает только окно модели на стороне провайдера.
 	ContextLimit *int `yaml:"context_limit" json:"context_limit,omitempty"`
+
+	// Context — стратегия сборки контекста (день 9): "" — вся история,
+	// "summary" — сводка старой части плюс последние KeepLast сообщений.
+	// Сжатие запускается, когда за хвостом накопилось SummarizeEvery сообщений.
+	Context        string `yaml:"context" json:"context,omitempty"`
+	KeepLast       *int   `yaml:"keep_last" json:"keep_last,omitempty"`
+	SummarizeEvery *int   `yaml:"summarize_every" json:"summarize_every,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -63,6 +70,12 @@ func (c Config) Clone() Config {
 	}
 	if c.ContextLimit != nil {
 		out.ContextLimit = llm.I(*c.ContextLimit)
+	}
+	if c.KeepLast != nil {
+		out.KeepLast = llm.I(*c.KeepLast)
+	}
+	if c.SummarizeEvery != nil {
+		out.SummarizeEvery = llm.I(*c.SummarizeEvery)
 	}
 	return out
 }
@@ -133,6 +146,9 @@ func (c Config) Summary() string {
 	if c.ContextLimit != nil {
 		parts = append(parts, fmt.Sprintf("ctx≤%d", *c.ContextLimit))
 	}
+	if c.Context == ContextSummary {
+		parts = append(parts, fmt.Sprintf("summary: хвост %d, сжатие каждые %d", c.keepLast(), c.summarizeEvery()))
+	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
 	}
@@ -188,5 +204,18 @@ func overlay(base, top Config) Config {
 	if top.ContextLimit != nil {
 		out.ContextLimit = llm.I(*top.ContextLimit)
 	}
+	if top.Context != "" {
+		out.Context = top.Context
+	}
+	if top.KeepLast != nil {
+		out.KeepLast = llm.I(*top.KeepLast)
+	}
+	if top.SummarizeEvery != nil {
+		out.SummarizeEvery = llm.I(*top.SummarizeEvery)
+	}
 	return out
 }
+
+// Overlay — конфиг base с заданными полями top поверх. Для сценариев,
+// где общие настройки пишутся один раз, а варианты отличаются парой полей.
+func Overlay(base, top Config) Config { return overlay(base, top) }

@@ -49,6 +49,8 @@ const (
 	EventFinalStart
 	// EventChunk — очередной кусок финального ответа.
 	EventChunk
+	// EventCompress — старая часть истории сжата в сводку (день 9).
+	EventCompress
 )
 
 // Event — уведомление для того, кто показывает ответ. Агенту всё равно,
@@ -130,8 +132,9 @@ type Agent struct {
 	cfg     Config
 	history []llm.Message // только user/assistant; system подставляется при отправке
 	stats   Stats
-	turns   []Turn  // расход по ходам текущего разговора (день 8)
-	calib   float64 // во сколько раз факт провайдера больше сырой оценки; 0 — ещё не знаем
+	turns   []Turn       // расход по ходам текущего разговора (день 8)
+	calib   float64      // во сколько раз факт провайдера больше сырой оценки; 0 — ещё не знаем
+	summary summaryState // сводка старой части разговора (день 9)
 	created time.Time
 	updated time.Time
 	// rev растёт при каждом изменении, которое стоит сохранить. По нему
@@ -208,6 +211,7 @@ func (a *Agent) Reset() {
 	a.mu.Lock()
 	a.history = nil
 	a.turns = nil // учёт ходов — про разговор; калибровка — про модель, её не трогаем
+	a.summary = summaryState{}
 	a.gen++
 	a.touch()
 	a.mu.Unlock()
@@ -243,7 +247,8 @@ func (a *Agent) changed() {
 func (a *Agent) Messages(text string) []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return compose(a.cfg.System, a.history, text)
+	system, past := window(a.cfg, a.history, a.summary)
+	return compose(system, past, text)
 }
 
 func compose(system string, history []llm.Message, text string) []llm.Message {
@@ -282,12 +287,19 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	a.mu.Lock()
 	cfg := a.cfg.Clone()
 	hist := append([]llm.Message(nil), a.history...)
+	sum := a.summary
 	gen := a.gen
-	turn := Turn{
-		At:        time.Now(),
-		Question:  a.calibrated(rawEstimate(text)),
-		Estimated: a.calibrated(rawEstimateMessages(compose(cfg.System, hist, text))),
-	}
+	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
+	a.mu.Unlock()
+
+	// День 9: если разговор разросся, старая часть сначала сжимается в сводку,
+	// и уже этот вопрос уходит с коротким контекстом.
+	sum = a.compress(ctx, cfg, hist, sum, gen, &turn, on)
+	system, past := window(cfg, hist, sum)
+
+	a.mu.Lock()
+	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)))
+	turn.Sent = len(past)
 	a.mu.Unlock()
 
 	// Свой лимит контекста агента проверяется до отправки: запрос, который
@@ -302,17 +314,18 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	reply := &Reply{}
 
 	for _, st := range chain {
-		system := cfg.System
-		if st.System != "" {
-			system = st.System
-		}
-		// История подмешивается только в финальный шаг: промежуточные шаги —
+		// История (в том виде, в каком её собрала стратегия контекста)
+		// подмешивается только в финальный шаг: промежуточные шаги —
 		// самостоятельные вызовы со своими ролями.
-		var past []llm.Message
+		stepSystem := cfg.System
+		var stepPast []llm.Message
 		if st.Final {
-			past = hist
+			stepSystem, stepPast = system, past
 		}
-		req := llm.Request{Messages: compose(system, past, st.Build(text, prev))}
+		if st.System != "" {
+			stepSystem = st.System
+		}
+		req := llm.Request{Messages: compose(stepSystem, stepPast, st.Build(text, prev))}
 		cfg.Apply(&req)
 
 		if st.Final && len(chain) > 1 {

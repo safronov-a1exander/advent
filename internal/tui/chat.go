@@ -481,6 +481,26 @@ func (m *Model) dumpAgent() {
 	m.pushLine(stDim.Render(fmt.Sprintf("  конфиг   модель %s · %s", cfg.Model, sum)))
 	m.pushLine(stDim.Render(fmt.Sprintf("  расход   ходов %d · вызовов %d · ошибок %d · in %d (кэш %d) · out %d · reasoning %d · $%.6f",
 		st.Turns, st.Calls, st.Errors, st.Prompt, st.Cached, st.Completion, st.Reasoning, st.CostUSD)))
+	// День 9: память и контекст расходятся — показываем оба.
+	hist := len(m.ag.History())
+	if text, covered := m.ag.Summary(); text != "" && cfg.Context == agent.ContextSummary {
+		// Несжатых бывает больше хвоста: они копятся, пока за хвостом
+		// не наберётся порог следующего сжатия.
+		pending := hist - covered - cfg.KeepLastN()
+		if pending < 0 {
+			pending = 0
+		}
+		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений хранится целиком; в запрос уходят сводка первых %d и ещё не сжатые %d",
+			hist, covered, hist-covered)))
+		m.pushLine(stDim.Render(fmt.Sprintf("           (хвост %d + накопилось %d из %d до следующего сжатия)",
+			cfg.KeepLastN(), pending, cfg.SummarizeEveryN())))
+		m.pushLine(stDim.Render("  сводка:"))
+		for _, l := range strings.Split(shorten2(text, 8), "\n") {
+			m.pushLine(stDim.Render("    " + l))
+		}
+	} else {
+		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений; в запрос уходят все (%s)", hist, agent.ContextLabel(cfg.Context))))
+	}
 	m.pushLine(stDim.Render(fmt.Sprintf("  стек     %d сообщений уйдёт в API со следующим вопросом:", len(stack))))
 	for i, msg := range stack {
 		m.pushLine(stDim.Render(fmt.Sprintf("    %2d %-9s %5d симв.  %s",
@@ -548,6 +568,18 @@ func (m *Model) onEvent(e agent.Event) {
 		m.pushLine(stBot.Render("▸ " + e.Label))
 	case agent.EventChunk:
 		m.partial.WriteString(e.Content)
+	case agent.EventCompress:
+		if e.Usage.PromptTokens == 0 {
+			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))
+			break
+		}
+		m.pushLine(stNote.Render("▸ " + e.Label))
+		m.pushLine(stDim.Render(fmt.Sprintf("  ↳ служебный вызов: вход %d · сводка %d токенов · %s",
+			e.Usage.PromptTokens, e.Usage.CompletionTokens, e.Latency.Round(time.Millisecond))))
+		for _, l := range strings.Split(shorten2(e.Content, 6), "\n") {
+			m.pushLine(stDim.Render("  " + l))
+		}
+		m.pushLine("")
 	}
 	m.refresh()
 }
