@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/profile"
 )
 
 // typeText — «печатает» строку в поле ввода и жмёт Enter, как это делает
@@ -133,5 +136,75 @@ func TestResetKeepsTaskAndUserLayers(t *testing.T) {
 	}
 	if !strings.Contains(m.View().Content, "🧠") {
 		t.Fatal("в шапке пропала сводка памяти")
+	}
+}
+
+// profModel — экран с каталогом профилей: сеньор и джуниор.
+func profModel(t *testing.T) *Model {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"сеньор.yaml":  "name: Олег, сеньор\nabout: тимлид\nstyle:\n  tone: сухой\npipelines:\n  - name: решить\n    stages: [варианты, цена]\n",
+		"джуниор.yaml": "name: Максим, джуниор\nabout: полгода в профессии\nstyle:\n  tone: дружелюбный\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := NewSettings([]llm.ModelInfo{{ID: "m"}}, "m", "sys")
+	set.Profile = "сеньор"
+	set.Profiles = []string{"джуниор", "сеньор"}
+	p := agent.NewPool(echoProvider{}, "echo", nil)
+	p.SetProfileStore(profile.NewFileStore(dir))
+	m := NewModel(Options{Pool: p, Provider: "echo", Settings: set})
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+	return m
+}
+
+func TestProfileCommandSwitchesAndClears(t *testing.T) {
+	m := profModel(t)
+	if m.ag.Profile() == nil || m.ag.Profile().Name != "Олег, сеньор" {
+		t.Fatal("стартовый профиль не подключился")
+	}
+	if !strings.Contains(m.View().Content, "👤") {
+		t.Fatal("в шапке нет профиля")
+	}
+
+	typeText(t, m, "/profile джуниор")
+	if got := m.ag.Profile(); got == nil || got.Name != "Максим, джуниор" {
+		t.Fatalf("профиль не переключился: %+v", got)
+	}
+	// Команда профиля — не реплика: в разговор она не уходит.
+	if n := len(m.ag.History()); n != 0 {
+		t.Fatalf("команда профиля ушла в разговор: %d сообщений", n)
+	}
+
+	typeText(t, m, "/profile")
+	if m.ag.Profile() != nil {
+		t.Fatal("пустой аргумент должен снимать профиль")
+	}
+	// В шапке профиля больше нет (в ленте остаётся строка «профиль снят»,
+	// поэтому ищем именно имя, а не значок).
+	if strings.Contains(m.View().Content, "👤 Максим") {
+		t.Fatal("снятый профиль остался в шапке")
+	}
+
+	typeText(t, m, "/profile которого-нет")
+	if m.flash == "" {
+		t.Fatal("о непрочитанном профиле должно быть сказано")
+	}
+}
+
+func TestProfileGoesIntoPromptAndDump(t *testing.T) {
+	m := profModel(t)
+	say(t, m, "объясни dependency injection")
+
+	press(t, m, "ctrl+d")
+	dump := strings.Join(m.lines, "\n")
+	if !strings.Contains(dump, "профиль  Олег, сеньор") {
+		t.Fatalf("Ctrl+D не показал профиль:\n%s", dump)
+	}
+	if !strings.Contains(dump, "дорога   «решить»: варианты → цена") {
+		t.Fatalf("Ctrl+D не показал дорогу:\n%s", dump)
 	}
 }

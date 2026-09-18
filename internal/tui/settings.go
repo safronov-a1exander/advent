@@ -41,7 +41,12 @@ type Settings struct {
 	KeepLast       *int
 	SummarizeEvery *int
 
-	// День 11 — модель памяти: режим раскладки и ключи хранимых слоёв.
+	// День 12 — профиль пользователя: id и список доступных для перебора.
+	Profile  string
+	Profiles []string
+
+	// День 11 — модель памяти: режим раскладки, ключи хранимых слоёв
+	// и какие слои уходят в промпт.
 	Memory string
 	User   string
 	Task   string
@@ -268,6 +273,17 @@ func (s *Settings) Fields() []Field {
 				func(v *int) { s.SummarizeEvery = v },
 				2, 2, 200, 10))
 
+		// День 12 — профиль. Стоит перед памятью, как и в самом промпте:
+		// сначала «как отвечать», потом «что известно».
+		prof := EnumField("профиль",
+			"кто собеседник, как с ним говорить и какой дорогой гнать его запросы; файлы в profiles/*.yaml. Пусто — без персонализации",
+			s.profileIDs(),
+			func() string { return s.Profile },
+			func(v string) { s.Profile = v })
+		prof.Text = func() string { return s.Profile }
+		prof.SetText = func(v string) error { s.Profile = strings.TrimSpace(v); return nil }
+		f = append(f, prof)
+
 		// День 11 — слои памяти. Ключи слоёв рядом с режимом: сменить задачу
 		// значит сменить рабочую память, и это должно быть видно в одном месте.
 		mem := EnumField("память", "", agent.MemoryModes,
@@ -309,6 +325,24 @@ func (s *Settings) Fields() []Field {
 	return f
 }
 
+// profileIDs — что можно перебрать стрелками: пусто (без профиля) и всё,
+// что лежит в каталоге профилей. Текущий добавляется, даже если файла нет, —
+// иначе имя, введённое руками, исчезало бы при первом же нажатии стрелки.
+func (s *Settings) profileIDs() []string {
+	ids := []string{""}
+	seen := map[string]bool{"": true}
+	for _, id := range s.Profiles {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if s.Profile != "" && !seen[s.Profile] {
+		ids = append(ids, s.Profile)
+	}
+	return ids
+}
+
 // splitList режет «a, b, c» в список, выкидывая пустые куски.
 func splitList(v string) []string {
 	var out []string
@@ -338,6 +372,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		Context:        s.Context,
 		KeepLast:       s.KeepLast,
 		SummarizeEvery: s.SummarizeEvery,
+		Profile:        s.Profile,
 		Memory:         s.Memory,
 		User:           s.User,
 		Task:           s.Task,
@@ -363,6 +398,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.Context = c.Context
 	s.KeepLast = c.KeepLast
 	s.SummarizeEvery = c.SummarizeEvery
+	s.Profile = c.Profile
 	s.Memory = c.Memory
 	s.User = c.User
 	s.Task = c.Task

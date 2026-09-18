@@ -22,6 +22,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/dialog"
+	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
 )
 
@@ -55,10 +56,18 @@ func cmdDialog(ctx context.Context, args []string) error {
 	fmt.Printf("сценарий  %s · провайдер %s\n", *path, prov.Name)
 	fmt.Printf("диалог    %d реплик, вариантов %d — идут параллельно\n\n", len(s.Dialog), len(s.Variants))
 
+	// Пул сравнения: профили читаются из репозитория (день 12), а слоям
+	// памяти хранилище нарочно не даётся (день 11) — варианты не должны
+	// писать в одни файлы и подсматривать друг у друга. Слои живут
+	// в процессе и умирают вместе с прогоном.
+	pool := agent.NewPool(client, prov.Name, journal)
+	pool.SetProfileStore(profile.NewFileStore(cfg.ProfilesDir))
+	pool.SetCatalog(tiersOf(prov.Models))
+
 	started := time.Now()
 	var mu sync.Mutex
 	done := map[string]int{}
-	res, err := dialog.Run(ctx, agent.NewPool(client, prov.Name, journal), prov.Models, s,
+	res, err := dialog.Run(ctx, pool, prov.Models, s,
 		func(variant string, step, total int) {
 			mu.Lock()
 			defer mu.Unlock()

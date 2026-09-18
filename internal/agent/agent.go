@@ -28,6 +28,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
 )
 
@@ -54,6 +55,10 @@ const (
 	// в сводку (день 9), обновление фактов (день 10) или раскладка новой
 	// реплики по слоям памяти (день 11).
 	EventContext
+	// EventPipeline — профиль выбрал дорогу для этого запроса (день 12).
+	// Не вызов API, а решение: пользователь должен видеть, куда свернул
+	// его запрос, до того как получит ответ.
+	EventPipeline
 )
 
 // Event — уведомление для того, кто показывает ответ. Агенту всё равно,
@@ -142,6 +147,14 @@ type Agent struct {
 	// mem — слои памяти: краткосрочный (этот разговор), рабочий (задача) и
 	// долговременный (пользователь). nil, если память выключена (день 11).
 	mem *memory.Memory
+	// prof — профиль пользователя: как отвечать и какой дорогой гнать
+	// запрос. Пишет его человек, агент только читает (день 12).
+	prof *profile.Profile
+	// catalog — модели провайдера с классами; по нему дорога профиля
+	// выбирает класс модели.
+	catalog []ModelTier
+	// newProf — как поднять профиль по id; ставит пул.
+	newProf func(string) (*profile.Profile, error)
 	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
 	// разговора меняют задачу или пользователя: слои должны переехать
 	// на другие файлы, а не продолжать писать в прежние.
@@ -196,6 +209,13 @@ func (a *Agent) SetConfig(c Config) {
 	// рабочая память прежней задачи в новой задаче неверна, а чужой
 	// долговременный слой — тем более. Краткосрочный слой при этом остаётся:
 	// разговор тот же (день 11).
+	// Сменили профиль — поднимаем другой. Ошибка чтения не должна ломать
+	// разговор: остаётся прежний профиль, а о сбое скажет пул (день 12).
+	if a.newProf != nil && a.cfg.Profile != c.Profile {
+		if p, err := a.newProf(c.Profile); err == nil {
+			a.prof = p
+		}
+	}
 	if a.newMem != nil && (a.cfg.Memory != c.Memory || a.cfg.User != c.User || a.cfg.Task != c.Task) {
 		chat := a.mem.Layer(memory.ScopeChat).Entries()
 		a.mem = a.newMem(c)
@@ -283,6 +303,8 @@ func (a *Agent) Messages(text string) []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	system, past := window(a.cfg, a.history, a.summary, a.facts)
+	pl, picked := a.prof.Pick(text)
+	system = withMemory(system, profileBlocks(a.prof, pl, picked))
 	system = withMemory(system, a.memoryBlocks(a.cfg, a.mem))
 	return compose(system, past, text)
 }
@@ -337,6 +359,8 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	sum := a.summary
 	facts := append([]Fact(nil), a.facts...)
 	mem := a.mem
+	prof := a.prof
+	catalog := a.catalog
 	gen := a.gen
 	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
 	a.mu.Unlock()
@@ -350,7 +374,17 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// День 11: новая реплика раскладывается по слоям памяти до отправки —
 	// вопрос уходит уже с обновлённой рабочей и долговременной памятью.
 	a.route(ctx, cfg, mem, hist, text, gen, &turn, on)
+
+	// День 12: дорога профиля выбирается по тексту запроса и накладывается
+	// на копию конфига — стратегия рассуждения и класс модели.
+	pl, picked := prof.Pick(text)
+	cfg = applyPipeline(cfg, pl, picked, catalog)
+	if picked && pl.Name != "" {
+		on(Event{Kind: EventPipeline, Label: pl.Name, Content: strings.Join(pl.Stages, " → ")})
+	}
+
 	system, past := window(cfg, hist, sum, facts)
+	system = withMemory(system, profileBlocks(prof, pl, picked))
 	system = withMemory(system, a.memoryBlocks(cfg, mem))
 
 	a.mu.Lock()

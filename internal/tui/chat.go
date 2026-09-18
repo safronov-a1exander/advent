@@ -579,6 +579,28 @@ func (m *Model) dumpAgent() {
 	default:
 		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений; в запрос уходят все (%s)", hist, agent.ContextLabel(cfg.Context))))
 	}
+	// День 12: профиль и дорога, по которой пойдёт следующий запрос.
+	if prof := m.ag.Profile(); prof != nil {
+		m.pushLine(stDim.Render(fmt.Sprintf("  профиль  %s", prof.Summary())))
+		if pl, ok := m.ag.Pipeline(m.lastQuestion); ok {
+			road := fmt.Sprintf("  дорога   «%s»", pl.Name)
+			if len(pl.Stages) > 0 {
+				road += ": " + strings.Join(pl.Stages, " → ")
+			}
+			var extra []string
+			if pl.Strategy != "" {
+				extra = append(extra, "стратегия "+pl.Strategy)
+			}
+			if pl.Tier != "" {
+				extra = append(extra, "класс "+pl.Tier)
+			}
+			if len(extra) > 0 {
+				road += " · " + strings.Join(extra, " · ")
+			}
+			m.pushLine(stDim.Render(road))
+			m.pushLine(stDim.Render("           (дорога выбирается по тексту запроса — здесь по последнему)"))
+		}
+	}
 	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос
 	// задания «какие данные попадают в каждый слой».
 	if mem := m.ag.Memory(); mem != nil {
@@ -661,6 +683,14 @@ func (m *Model) onEvent(e agent.Event) {
 		m.pushLine(stBot.Render("▸ " + e.Label))
 	case agent.EventChunk:
 		m.partial.WriteString(e.Content)
+	case agent.EventPipeline:
+		// Не вызов API, а решение профиля: этот запрос пошёл такой дорогой.
+		// Показываем до ответа — иначе непонятно, почему он такой.
+		road := "▸ дорога «" + e.Label + "»"
+		if e.Content != "" {
+			road += ": " + e.Content
+		}
+		m.pushLine(stNote.Render(road))
 	case agent.EventContext:
 		if e.Usage.PromptTokens == 0 {
 			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))
@@ -799,6 +829,9 @@ func (m *Model) View() tea.View {
 	}
 	if n := len(m.ag.Branches()); n > 1 {
 		header += "  " + stNote.Render(fmt.Sprintf("⎇ %s · веток %d", m.ag.ActiveBranch(), n))
+	}
+	if prof := m.ag.Profile(); prof != nil {
+		header += "  " + stNote.Render("👤 "+prof.Summary())
 	}
 	if mh := memoryHeader(m.ag); mh != "" {
 		header += "  " + stNote.Render(mh)

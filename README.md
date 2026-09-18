@@ -47,7 +47,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -67,6 +67,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 9 | `day-09` | сжатие истории через summary | `docs/days/day09.md` |
 | 10 | `day-10` | sliding window, sticky facts, ветки разговора | `docs/days/day10.md` |
 | 11 | `day-11` | модель памяти: краткосрочная, рабочая, долговременная | `docs/days/day11.md` |
+| 12 | `day-12` | персонализация: профиль пользователя и дороги запросов | `docs/days/day12.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -110,6 +111,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 9 | `контекст` (полная история / summary), `хвост как есть`, `сжимать каждые`; флаги `-context`, `-keep-last`, `-summarize-every` |
 | день 10 | `контекст` дополнился sliding window и sticky facts; ветки разговора — `Ctrl+B`; в сценарии `advent dialog` — команды `checkpoint`/`branch`/`switch` и `branches: true` у варианта |
 | день 11 | `память` (выкл / руками / агентом), `юзер`, `задача`, `слои в промпт`; слои — `Ctrl+M`, запись из поля ввода `/user ключ = значение`; флаги `-memory`, `-user`, `-task`, `-memory-scopes`, `-memory-dir`; команда `advent memory`; в сценарии — `newchat` и `remember` |
+| день 12 | `профиль` — файлы из `profiles/*.yaml`: стиль, ограничения и дороги запросов; `/profile <id>` из поля ввода; флаги `-profile`, `-profiles-dir`; команда `advent profile`; в сценарии — `forbid` и `expect_by` |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.
