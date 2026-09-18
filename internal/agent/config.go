@@ -58,6 +58,12 @@ type Config struct {
 	Memory string `yaml:"memory" json:"memory,omitempty"`
 	User   string `yaml:"user" json:"user,omitempty"`
 	Task   string `yaml:"task" json:"task,omitempty"`
+	// TaskState — режим состояния задачи (день 13): "" (без стадий),
+	// "manual" (стадии в промпте, двигает пользователь), "auto" (плюс
+	// служебный вызов продвижения). Ключ задачи — то же поле Task, что
+	// и у рабочего слоя памяти: это одна и та же задача с двух сторон.
+	TaskState string `yaml:"task_state" json:"task_state,omitempty"`
+
 	// Profile — id профиля пользователя (день 12): profiles/<id>.yaml.
 	// Пусто — без профиля, агент работает как на одиннадцатом дне.
 	Profile string `yaml:"profile" json:"profile,omitempty"`
@@ -171,6 +177,9 @@ func (c Config) Summary() string {
 	if c.Profile != "" {
 		parts = append(parts, "профиль: "+c.Profile)
 	}
+	if c.TaskState != "" {
+		parts = append(parts, "стадии: "+c.TaskState)
+	}
 	if c.Memory != "" {
 		mem := "память: " + c.Memory
 		if c.User != "" {
@@ -247,6 +256,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.Profile != "" {
 		out.Profile = top.Profile
+	}
+	if top.TaskState != "" {
+		out.TaskState = top.TaskState
 	}
 	if top.Memory != "" {
 		out.Memory = top.Memory

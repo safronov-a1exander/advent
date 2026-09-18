@@ -13,6 +13,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
+	"github.com/safronov-a1exander/advent/internal/task"
 )
 
 // Pool порождает агентов и держит их в одном процессе.
@@ -45,6 +46,78 @@ type Pool struct {
 	// catalog — модели провайдера с классами; дорога профиля выбирает
 	// по нему модель под класс.
 	catalog []ModelTier
+
+	// taskStore — где лежат состояния задач (день 13). Как и слои памяти,
+	// задача принадлежит не агенту: два разговора об одной задаче должны
+	// видеть одно и то же состояние.
+	taskStore task.Store
+}
+
+// SetTaskStore включает состояние задач.
+func (p *Pool) SetTaskStore(s task.Store) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.taskStore = s
+}
+
+// TaskStore — хранилище задач или nil.
+func (p *Pool) TaskStore() task.Store {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.taskStore
+}
+
+// loadTask поднимает задачу под конфиг; если её ещё нет — заводит новую.
+func (p *Pool) loadTask(cfg Config) (*task.Task, error) {
+	p.mu.Lock()
+	st := p.taskStore
+	p.mu.Unlock()
+	return newTask(st, cfg)
+}
+
+// newTask — состояние задачи под конфиг, без блокировок пула.
+//
+// Хранилища может не быть — тогда задача живёт в процессе. Это нужно
+// сравнению вариантов: два варианта одного сценария не должны двигать
+// одно и то же состояние.
+func newTask(st task.Store, cfg Config) (*task.Task, error) {
+	if cfg.TaskState == TaskOff || strings.TrimSpace(cfg.Task) == "" {
+		return nil, nil
+	}
+	if st == nil {
+		return task.New(cfg.Task, cfg.Task), nil
+	}
+	t, err := st.Load(cfg.Task)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		t = task.New(cfg.Task, cfg.Task)
+	}
+	return t, nil
+}
+
+// saveTask пишет задачу в хранилище пула.
+func (p *Pool) saveTask(t *task.Task) error {
+	p.mu.Lock()
+	st := p.taskStore
+	p.mu.Unlock()
+	if st == nil || t == nil {
+		return nil
+	}
+	return st.Save(t)
+}
+
+// wireTask поднимает задачу агента; вызывать под p.mu.
+func (p *Pool) wireTask(a *Agent, cfg Config) {
+	a.newTask = p.loadTask
+	a.saveTask = p.saveTask
+	t, err := newTask(p.taskStore, cfg)
+	if err != nil {
+		p.saveErr = fmt.Errorf("состояние задачи %q не прочиталось: %w", cfg.Task, err)
+		return
+	}
+	a.task = t
 }
 
 // SetProfileStore включает профили: агент с непустым Config.Profile
@@ -221,6 +294,7 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 		temp:     temp,
 	}
 	p.wireProfile(a, cfg)
+	p.wireTask(a, cfg)
 	a.newMem = p.newMemory
 	a.mem, err = newMemory(p.memStore, cfg)
 	if err != nil {
@@ -289,6 +363,7 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			rev:      snap.Rev,
 		}
 		p.wireProfile(a, snap.Config)
+		p.wireTask(a, snap.Config)
 		a.newMem = p.newMemory
 		mem, memErr := newMemory(p.memStore, snap.Config)
 		if memErr != nil {

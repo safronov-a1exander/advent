@@ -21,6 +21,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
+	"github.com/safronov-a1exander/advent/internal/task"
 	"github.com/safronov-a1exander/advent/internal/tui"
 )
 
@@ -48,6 +49,10 @@ type askFlags struct {
 	contextStrategy string
 	keepLast        int
 	summarizeEvery  int
+
+	// Состояние задачи (день 13).
+	taskState string
+	tasksDir  string
 
 	// Профиль пользователя (день 12).
 	profileID  string
@@ -77,6 +82,8 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.contextStrategy, "context", "", "стратегия контекста для chat/demo: пусто — вся история, window — последние N, facts — факты + последние N, summary — сводка + хвост")
 	fs.IntVar(&a.keepLast, "keep-last", 0, "для window/facts/summary: сколько последних сообщений идёт как есть (0 — по умолчанию)")
 	fs.IntVar(&a.summarizeEvery, "summarize-every", 0, "для summary: сжимать, когда за хвостом накопилось столько сообщений (0 — по умолчанию)")
+	fs.StringVar(&a.taskState, "task-state", "", "состояние задачи для chat/demo: пусто — без стадий, manual — двигает пользователь, auto — плюс служебный вызов")
+	fs.StringVar(&a.tasksDir, "tasks-dir", "", "каталог состояний задач (по умолчанию tasks_dir из config.yaml)")
 	fs.StringVar(&a.profileID, "profile", "", "профиль пользователя для chat/demo: имя файла из profiles/ без расширения")
 	fs.StringVar(&a.profileDir, "profiles-dir", "", "каталог профилей (по умолчанию profiles_dir из config.yaml)")
 	fs.StringVar(&a.memoryMode, "memory", "", "слои памяти для chat/demo: пусто — выключены, manual — кладёт пользователь, auto — плюс раскладка агентом")
@@ -121,6 +128,14 @@ func (a *askFlags) setup() (*llm.Client, *config.Provider, *store.Writer, llm.Re
 		req.MaxTokens = llm.I(a.maxTokens)
 	}
 	return client, prov, w, req, nil
+}
+
+// tasksStoreDir — каталог состояний задач: флаг важнее config.yaml.
+func (a *askFlags) tasksStoreDir() string {
+	if a.tasksDir != "" {
+		return a.tasksDir
+	}
+	return a.cfg.TasksDir
 }
 
 // profilesStoreDir — каталог профилей: флаг важнее config.yaml.
@@ -304,6 +319,14 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		}
 	}
 	set.Profile = a.profileID
+
+	// День 13: состояние задачи переживает и разговор, и перезапуск —
+	// в этом весь смысл паузы и продолжения.
+	if !slices.Contains(agent.TaskModes, a.taskState) {
+		return fmt.Errorf("-task-state: ожидали пусто, manual или auto, получили %q", a.taskState)
+	}
+	set.TaskState = a.taskState
+	pool.SetTaskStore(task.NewFileStore(a.tasksStoreDir()))
 
 	// День 11: слои задачи и пользователя переживают и разговор, и перезапуск,
 	// поэтому лежат в своём каталоге, а не в файле разговора. Включаются

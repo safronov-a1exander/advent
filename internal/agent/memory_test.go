@@ -58,6 +58,28 @@ func (p routeProvider) ChatStream(ctx context.Context, req llm.Request, on func(
 	return p.Chat(ctx, req)
 }
 
+// lastMain — последний ОСНОВНОЙ запрос: служебные вызовы (раскладка
+// памяти, продвижение задачи, сжатие, факты) тоже попадают в f.requests,
+// и последним чаще всего лежит именно служебный.
+func (f *fakeLLM) lastMain() llm.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.requests) - 1; i >= 0; i-- {
+		head := f.requests[i].Messages[0].Content
+		aux := false
+		for _, p := range []string{"Ты раскладываешь новую информацию", "Ты следишь за состоянием рабочей задачи",
+			"Ты сжимаешь переписку", "Ты ведёшь блок ключевых фактов"} {
+			if strings.HasPrefix(head, p) {
+				aux = true
+			}
+		}
+		if !aux {
+			return f.requests[i]
+		}
+	}
+	return f.requests[len(f.requests)-1]
+}
+
 // systemOf — системный промпт последнего запроса.
 func systemOf(req llm.Request) string {
 	if len(req.Messages) > 0 && req.Messages[0].Role == llm.RoleSystem {

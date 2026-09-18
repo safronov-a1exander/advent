@@ -32,6 +32,9 @@ type Config struct {
 	// ProfilesDir — где лежат профили пользователей (день 12). Профиль —
 	// конфиг, а не данные: каталог ложится в репозиторий рядом с кодом.
 	ProfilesDir string `yaml:"profiles_dir"`
+	// TasksDir — где лежат состояния задач (день 13). Отдельно от памяти:
+	// память задачи отвечает «что мы выяснили», состояние — «где мы в ней».
+	TasksDir string `yaml:"tasks_dir"`
 	// MemoryDir — где лежат хранимые слои памяти: рабочая (по задаче) и
 	// долговременная (по пользователю) (день 11). Отдельно от разговоров:
 	// слои переживают разговор и принадлежат не ему.
@@ -68,6 +71,9 @@ func Load(dir string) (*Config, error) {
 	}
 	if cfg.ProfilesDir == "" {
 		cfg.ProfilesDir = filepath.Join(dir, "profiles")
+	}
+	if cfg.TasksDir == "" {
+		cfg.TasksDir = filepath.Join(dir, "tasks")
 	}
 	if cfg.MemoryDir == "" {
 		cfg.MemoryDir = filepath.Join(dir, "memory")
