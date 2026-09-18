@@ -93,6 +93,7 @@ var keyMap = map[string]tea.KeyPressMsg{
 	"ctrl+e":    {Code: 'e', Mod: tea.ModCtrl},
 	"ctrl+j":    {Code: 'j', Mod: tea.ModCtrl},
 	"ctrl+l":    {Code: 'l', Mod: tea.ModCtrl},
+	"ctrl+m":    {Code: 'm', Mod: tea.ModCtrl},
 	"ctrl+n":    {Code: 'n', Mod: tea.ModCtrl},
 	"ctrl+o":    {Code: 'o', Mod: tea.ModCtrl},
 	"ctrl+p":    {Code: 'p', Mod: tea.ModCtrl},

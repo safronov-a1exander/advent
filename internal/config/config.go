@@ -29,6 +29,10 @@ type Config struct {
 	ReportsDir      string     `yaml:"reports_dir"`
 	// SessionsDir — где лежат сохранённые разговоры агентов (день 7).
 	SessionsDir string `yaml:"sessions_dir"`
+	// MemoryDir — где лежат хранимые слои памяти: рабочая (по задаче) и
+	// долговременная (по пользователю) (день 11). Отдельно от разговоров:
+	// слои переживают разговор и принадлежат не ему.
+	MemoryDir string `yaml:"memory_dir"`
 }
 
 var ErrNoKey = errors.New("не найден API-ключ")
@@ -58,6 +62,9 @@ func Load(dir string) (*Config, error) {
 	}
 	if cfg.ReportsDir == "" {
 		cfg.ReportsDir = filepath.Join(dir, "reports")
+	}
+	if cfg.MemoryDir == "" {
+		cfg.MemoryDir = filepath.Join(dir, "memory")
 	}
 	if cfg.SessionsDir == "" {
 		cfg.SessionsDir = filepath.Join(dir, "sessions")

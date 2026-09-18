@@ -114,6 +114,8 @@ func main() {
 		switch {
 		case factsRequest(req.Messages):
 			source, sep = []string{mockFacts(req.Messages)}, ""
+		case routeRequest(req.Messages):
+			source, sep = []string{mockRoute(req.Messages)}, ""
 		case wantJSON:
 			source, sep = chunkJSON(sampleJSON), ""
 		case recallQuestion(req.Messages):
@@ -259,12 +261,56 @@ func mockFacts(msgs []message) string {
 	return string(b)
 }
 
+// routeRequest — служебный запрос раскладки памяти по слоям (день 11).
+func routeRequest(msgs []message) bool {
+	return len(msgs) >= 2 && strings.HasPrefix(msgs[0].Content, "Ты раскладываешь новую информацию")
+}
+
+// mockRoute — раскладка без модели. Имя из «меня зовут» уходит в
+// долговременный слой, всё прочее — в рабочий, и только если реплика
+// похожа на сообщение факта. Этого хватает, чтобы на репетиции прошёл
+// весь путь: служебный вызов, JSON с разницей, блоки слоёв в промпте.
+func mockRoute(msgs []message) string {
+	_, msg, _ := strings.Cut(msgs[1].Content, "Новое сообщение пользователя:\n")
+	msg = strings.Join(strings.Fields(msg), " ")
+	type change struct {
+		Scope string `json:"scope"`
+		Key   string `json:"key"`
+		Value string `json:"value,omitempty"`
+	}
+	var remember []change
+	if m := nameRe.FindStringSubmatch(msg); m != nil {
+		remember = append(remember, change{Scope: "user", Key: "имя", Value: m[1]})
+	} else if msg != "" && !strings.HasSuffix(msg, "?") {
+		if r := []rune(msg); len(r) > 60 {
+			msg = string(r[:60]) + "…"
+		}
+		remember = append(remember, change{Scope: "task", Key: "сказано", Value: msg})
+	}
+	b, _ := json.Marshal(map[string]any{"remember": remember, "forget": []change{}})
+	return string(b)
+}
+
 func recallQuestion(msgs []message) bool {
 	last := lastUser(msgs)
 	return last >= 0 && strings.Contains(strings.ToLower(msgs[last].Content), "как меня зовут")
 }
 
+// memNameRe — имя из блока слоя памяти в системном промпте (день 11):
+// раскладка кладёт туда «- имя: Олег», а не реплику целиком.
+var memNameRe = regexp.MustCompile(`(?im)^[-\s]*имя:\s*([\p{L}-]+)`)
+
 func recall(msgs []message) string {
+	// Сначала память: слои уходят в системный промпт, и разговор до них
+	// мог быть стёрт — ровно этот случай сравнение дня 11 и проверяет.
+	for _, m := range msgs {
+		if m.Role != "system" {
+			continue
+		}
+		if g := memNameRe.FindStringSubmatch(m.Content); g != nil {
+			return "Тебя зовут " + g[1] + " — это лежит в долговременной памяти."
+		}
+	}
 	last := lastUser(msgs)
 	for i := last - 1; i >= 0; i-- {
 		// Прошлые вопросы «как меня зовут и …» — не представление:

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/agent"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // Markdown — отчёт о прогоне: итоги, рост запроса по ходам, проверки
@@ -38,7 +39,8 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 
 	b.WriteString("## Запрос по ходам\n\n")
 	b.WriteString("Токены запроса (факт провайдера), сколько сообщений истории ушло вместе с вопросом, " +
-		"служебные вызовы и ветка, если не основная. Строки «⎇» — команды веток: вариант без веток их пропускает.\n\n")
+		"служебные вызовы и ветка, если не основная. Строки «⎇» — команды веток: вариант без веток их пропускает. " +
+		"Строки «🧠» — команды памяти; «↺» значит новый разговор: история стёрта, слои задачи и пользователя остались.\n\n")
 	b.WriteString("| ход | реплика |")
 	for _, r := range res {
 		fmt.Fprintf(&b, " %s |", r.Variant.Name)
@@ -111,6 +113,25 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 	}
 
 	for _, r := range res {
+		if len(r.Layers) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "## Слои памяти к концу прогона — %s\n\n", r.Variant.Name)
+		for _, sc := range memory.Scopes {
+			entries := r.Layers[sc]
+			if len(entries) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "**%s (%s)** — %s\n\n", sc, sc.Label(), sc.Hint())
+			b.WriteString("| ключ | значение | положил |\n|---|---|---|\n")
+			for _, e := range entries {
+				fmt.Fprintf(&b, "| %s | %s | %s |\n", cell(e.Key, 40), cell(e.Value, 120), e.Source)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	for _, r := range res {
 		if len(r.Facts) == 0 {
 			continue
 		}
@@ -162,6 +183,9 @@ func VariantLabel(r Result) string {
 	}
 	if r.Branches {
 		label += " + ветки"
+	}
+	if c.Memory != "" {
+		label += " + " + agent.MemoryLabel(c.Memory)
 	}
 	return label
 }

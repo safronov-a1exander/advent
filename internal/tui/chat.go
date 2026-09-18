@@ -28,6 +28,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // ---- сообщения ----
@@ -78,6 +79,7 @@ const (
 	focusNotes
 	focusAgents   // список агентов на месте панели параметров
 	focusBranches // ветки и чекпойнты текущего разговора там же
+	focusMemory   // слои памяти агента там же (день 11)
 )
 
 // notesHeight — сколько строк блокнота видно одновременно.
@@ -119,6 +121,8 @@ type Model struct {
 	agentSel    int
 	branchSel   int
 	branchKeys  branchKeys
+	memSel      int
+	memKeys     memoryKeys
 	// flash — короткое пояснение в строке состояния до следующей клавиши:
 	// почему нажатие ничего не сделало.
 	flash string
@@ -157,6 +161,7 @@ func NewModel(o Options) *Model {
 		agentKeys: newAgentKeys(),
 	}
 	m.branchKeys = newBranchKeys()
+	m.memKeys = newMemoryKeys()
 	m.pool = o.Pool
 	m.transcripts = map[string][]string{}
 	m.ag = m.pickStartAgent()
@@ -277,6 +282,12 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.focus == focusMemory {
+		if cmd, handled := m.memoryKey(msg); handled {
+			return m, cmd
+		}
+		return m, nil
+	}
 
 	if m.focus == focusPanel {
 		if cmd, handled := m.panel.Update(msg); handled {
@@ -367,6 +378,9 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+b":
 		return m, m.openBranches()
 
+	case "ctrl+m":
+		return m, m.openMemory()
+
 	case "ctrl+e":
 		if m.busy.Load() {
 			return m, nil
@@ -389,6 +403,11 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.ta.Reset()
 		m.follow = true
+		// Команды памяти (день 11) в модель не уходят: это правка памяти
+		// агента, а не реплика разговора.
+		if m.memoryCommand(text) {
+			return m, nil
+		}
 		return m, m.send(text)
 	case "ctrl+j":
 		m.ta.InsertString("\n")
@@ -560,6 +579,25 @@ func (m *Model) dumpAgent() {
 	default:
 		m.pushLine(stDim.Render(fmt.Sprintf("  память   %d сообщений; в запрос уходят все (%s)", hist, agent.ContextLabel(cfg.Context))))
 	}
+	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос
+	// задания «какие данные попадают в каждый слой».
+	if mem := m.ag.Memory(); mem != nil {
+		m.pushLine(stDim.Render(fmt.Sprintf("  слои     %s · режим «%s»", mem.Summary(), agent.MemoryLabel(cfg.Memory))))
+		for _, sc := range memory.Scopes {
+			entries := mem.Layer(sc).Entries()
+			if len(entries) == 0 {
+				continue
+			}
+			goes := "уходит в промпт"
+			if !sentScope(cfg, sc) {
+				goes = "в промпт НЕ уходит"
+			}
+			m.pushLine(stDim.Render(fmt.Sprintf("    %s (%s) — %s:", sc, sc.Label(), goes)))
+			for _, e := range entries {
+				m.pushLine(stDim.Render("      " + shorten(e.Key+": "+e.Value, 100) + "  " + string(e.Source)))
+			}
+		}
+	}
 	m.pushLine(stDim.Render(fmt.Sprintf("  стек     %d сообщений уйдёт в API со следующим вопросом:", len(stack))))
 	for i, msg := range stack {
 		m.pushLine(stDim.Render(fmt.Sprintf("    %2d %-9s %5d симв.  %s",
@@ -673,7 +711,7 @@ func (m *Model) finish(reply *agent.Reply, err error) {
 func (m *Model) pushLine(s string) { m.lines = append(m.lines, s) }
 
 func (m *Model) panelW() int {
-	if !m.showPanel && m.focus != focusAgents && m.focus != focusBranches {
+	if !m.showPanel && m.focus != focusAgents && m.focus != focusBranches && m.focus != focusMemory {
 		return 0
 	}
 	w := m.w / 3
@@ -766,6 +804,9 @@ func (m *Model) View() tea.View {
 	if n := len(m.ag.Branches()); n > 1 {
 		header += "  " + stNote.Render(fmt.Sprintf("⎇ %s · веток %d", m.ag.ActiveBranch(), n))
 	}
+	if mh := memoryHeader(m.ag); mh != "" {
+		header += "  " + stNote.Render(mh)
+	}
 
 	transcript := m.frame(m.focus == focusInput).Width(m.vp.Width() + 2).Render(m.vp.View())
 	body := transcript
@@ -778,6 +819,8 @@ func (m *Model) View() tea.View {
 			side = m.agentsView(pw - 2)
 		case focusBranches:
 			side = m.branchesView(pw - 2)
+		case focusMemory:
+			side = m.memoryView(pw - 2)
 		}
 		panel := m.frame(m.focus != focusInput && m.focus != focusNotes).Width(pw).Render(side)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, transcript, panel)
@@ -854,9 +897,11 @@ func (m *Model) status() string {
 	case m.focus == focusBranches:
 		left = shortHelp(h, m.branchKeys.Move, m.branchKeys.Open,
 			m.branchKeys.Checkpoint, m.branchKeys.Back)
+	case m.focus == focusMemory:
+		left = shortHelp(h, m.memKeys.Move, m.memKeys.Forget, m.memKeys.Back)
 	default:
-		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Branches, m.keys.Debug,
-			m.keys.Tokens, m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
+		left = shortHelp(h, m.keys.Send, m.keys.Spawn, m.keys.Switch, m.keys.Branches, m.keys.Memory,
+			m.keys.Debug, m.keys.Tokens, m.keys.Cycle, m.keys.Bench, m.keys.Reset, m.keys.Scroll, m.keys.Quit)
 	}
 	left = prefix + left
 	if m.flash != "" {

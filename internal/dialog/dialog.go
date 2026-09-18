@@ -21,6 +21,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // Scenario — описание прогона.
@@ -47,6 +48,11 @@ type Variant struct {
 //   - branch: быстрый MVP           # новая ветка от чекпойнта from
 //     from: развилка
 //   - switch: быстрый MVP           # вернуться в ветку
+//
+// И командой памяти (день 11):
+//
+//   - newchat: заказчик вернулся   # стереть разговор, память задачи оставить
+//   - remember: user/стек = Go     # положить руками в слой
 type Line struct {
 	Say string `yaml:"say"`
 
@@ -54,6 +60,13 @@ type Line struct {
 	Branch     string `yaml:"branch"`
 	From       string `yaml:"from"`
 	Switch     string `yaml:"switch"`
+
+	// NewChat — оборвать разговор и начать новый тем же агентом. Слои
+	// задачи и пользователя переживают это, история и краткосрочный слой —
+	// нет. Ровно тот случай, ради которого слои и заведены.
+	NewChat string `yaml:"newchat"`
+	// Remember — положить запись руками: "user/ключ = значение".
+	Remember string `yaml:"remember"`
 
 	// Expect — подстроки, которые обязаны быть в ответе (без учёта регистра).
 	// Реплики с проверками — это вопросы на память о раннем разговоре.
@@ -80,7 +93,7 @@ func Load(path string) (*Scenario, error) {
 	}
 	for i, l := range s.Dialog {
 		commands := 0
-		for _, c := range []string{l.Checkpoint, l.Branch, l.Switch} {
+		for _, c := range []string{l.Checkpoint, l.Branch, l.Switch, l.NewChat, l.Remember} {
 			if strings.TrimSpace(c) != "" {
 				commands++
 			}
@@ -92,6 +105,8 @@ func Load(path string) (*Scenario, error) {
 			return nil, fmt.Errorf("%s: реплика %d пустая", path, i+1)
 		case l.Branch != "" && l.From == "":
 			return nil, fmt.Errorf("%s: строка %d — у branch нужен from (имя чекпойнта)", path, i+1)
+		case l.Remember != "" && !strings.Contains(l.Remember, "/"):
+			return nil, fmt.Errorf("%s: строка %d — remember пишется как \"user/ключ = значение\"", path, i+1)
 		}
 	}
 	return &s, nil
@@ -106,6 +121,10 @@ func (l Line) Command() string {
 		return "ветка «" + l.Branch + "» от «" + l.From + "»"
 	case l.Switch != "":
 		return "в ветку «" + l.Switch + "»"
+	case l.NewChat != "":
+		return "новый разговор: " + l.NewChat
+	case l.Remember != "":
+		return "запомнить: " + l.Remember
 	}
 	return ""
 }
@@ -136,6 +155,9 @@ type Result struct {
 	Elapsed  time.Duration
 	Summary  string       // сводка к концу разговора, если была
 	Facts    []agent.Fact // факты к концу разговора (sticky facts)
+	// Layers — слои памяти к концу прогона (день 11). Прямой ответ на
+	// вопрос задания «какие данные попадают в каждый слой».
+	Layers map[memory.Scope][]memory.Entry
 	// BranchList — ветки агента к концу прогона, если вариант ветвился.
 	BranchList []agent.BranchInfo
 }
@@ -224,7 +246,11 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			progress(cfg.Name, i+1, len(lines))
 		}
 		if cmd := l.Command(); cmd != "" {
-			res.Steps = append(res.Steps, runCommand(a, l, cmd, branches))
+			if l.NewChat != "" || l.Remember != "" {
+				res.Steps = append(res.Steps, runMemoryCommand(a, l, cmd))
+			} else {
+				res.Steps = append(res.Steps, runCommand(a, l, cmd, branches))
+			}
 			continue
 		}
 		turnsBefore := len(a.Turns())
@@ -248,6 +274,14 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 	res.Elapsed = time.Since(start)
 	res.Summary, _ = a.Summary()
 	res.Facts = a.Facts()
+	if mem := a.Memory(); mem != nil {
+		res.Layers = map[memory.Scope][]memory.Entry{}
+		for _, sc := range memory.Scopes {
+			if e := mem.Layer(sc).Entries(); len(e) > 0 {
+				res.Layers[sc] = e
+			}
+		}
+	}
 	if br := a.Branches(); len(br) > 1 {
 		res.BranchList = br
 	}
@@ -261,8 +295,13 @@ func (st Step) Brief(sent bool) string {
 	case st.Err != "":
 		return "ошибка"
 	case st.Command != "":
-		if strings.Contains(st.Command, "пропущено") {
+		switch {
+		case strings.Contains(st.Command, "пропущено"):
 			return "—"
+		case strings.HasPrefix(st.Command, "новый разговор"):
+			return "↺"
+		case strings.HasPrefix(st.Command, "запомнить"):
+			return "🧠"
 		}
 		return "→ " + st.Branch
 	}
@@ -286,10 +325,13 @@ func (st Step) Brief(sent bool) string {
 	return c
 }
 
-// Text — реплика строки или её команда веток для таблиц.
+// Text — реплика строки или её команда для таблиц.
 func (l Line) Text() string {
-	if cmd := l.Command(); cmd != "" {
-		return "⎇ " + cmd
+	switch {
+	case l.NewChat != "" || l.Remember != "":
+		return "🧠 " + l.Command()
+	case l.Command() != "":
+		return "⎇ " + l.Command()
 	}
 	return strings.Join(strings.Fields(l.Say), " ")
 }
@@ -333,6 +375,33 @@ func runCommand(a *agent.Agent, l Line, cmd string, branches bool) Step {
 	}
 	if err != nil {
 		st.Err = err.Error()
+	}
+	st.Branch = a.ActiveBranch()
+	return st
+}
+
+// runMemoryCommand выполняет команды памяти (день 11). В отличие от команд
+// веток их выполняют все варианты: newchat — это событие разговора, а не
+// приём одного варианта, и вариант без памяти должен пройти через него тоже
+// (и потерять всё — в этом и смысл сравнения).
+func runMemoryCommand(a *agent.Agent, l Line, cmd string) Step {
+	st := Step{Command: cmd, Branch: a.ActiveBranch()}
+	switch {
+	case l.NewChat != "":
+		a.Reset()
+	case l.Remember != "":
+		lhs, value, _ := strings.Cut(l.Remember, "=")
+		scope, key, _ := strings.Cut(lhs, "/")
+		sc := memory.Scope(strings.ToLower(strings.TrimSpace(scope)))
+		if !sc.Valid() {
+			st.Err = fmt.Sprintf("неизвестный слой %q", scope)
+			return st
+		}
+		if err := a.Remember(sc, strings.TrimSpace(key), strings.TrimSpace(value)); err != nil {
+			// Вариант без памяти просто не может ничего запомнить — это не
+			// сбой прогона, а его смысл.
+			st.Command = cmd + " — пропущено: у варианта нет памяти"
+		}
 	}
 	st.Branch = a.ActiveBranch()
 	return st
