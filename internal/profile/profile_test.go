@@ -7,54 +7,75 @@ import (
 	"testing"
 )
 
-func TestBlockSkipsEmptyFields(t *testing.T) {
-	p := &Profile{
-		Name:   "сеньор",
-		About:  "тимлид",
-		Style:  Style{Tone: "сухой"},
-		Limits: []string{"без предисловий"},
-	}
+func TestBlockIsTheFileBody(t *testing.T) {
+	// Профиль — это текст, который написал человек. Никакой сборки
+	// из полей: что написано, то и читает модель.
+	p := &Profile{Name: "сеньор", About: "Олег — тимлид.\n\nОтвечай сухо и коротко."}
 	b := p.Block()
-	for _, want := range []string{"тимлид", "тон: сухой", "ограничение: без предисловий"} {
-		if !strings.Contains(b, want) {
-			t.Fatalf("в блоке нет %q:\n%s", want, b)
-		}
+	if !strings.Contains(b, "Олег — тимлид.") || !strings.Contains(b, "Отвечай сухо и коротко.") {
+		t.Fatalf("тело файла не дошло до промпта:\n%s", b)
 	}
-	// Пустое «длина ответа: » модель читает как указание и начинает
-	// выдумывать, каким же он должен быть.
-	if strings.Contains(b, "длина ответа") || strings.Contains(b, "обращение") {
-		t.Fatalf("незаполненные поля попали в блок:\n%s", b)
+	// Абзацы сохраняются: это проза, а не список пунктов.
+	if !strings.Contains(b, "\n\n") {
+		t.Fatalf("разбиение на абзацы потерялось:\n%s", b)
 	}
-	if (&Profile{}).Block() != "" {
-		t.Fatal("пустой профиль должен давать пустой блок")
+	if (&Profile{Name: "пустой"}).Block() != "" {
+		t.Fatal("профиль без тела даёт пустой блок")
 	}
 }
 
-func TestPickRoutesByKeyword(t *testing.T) {
+func TestChoosePromptDescribesRoadsInProse(t *testing.T) {
 	p := &Profile{Pipelines: []Pipeline{
 		{Name: "решить"},
-		{Name: "инцидент", When: []string{"упал", "таймаут"}},
-		{Name: "ревью", When: []string{"посмотри код"}},
+		{Name: "инцидент", When: "что-то сломалось прямо сейчас"},
+	}}
+	q := ChoosePrompt(p, "у нас всё легло")
+	if !strings.Contains(q, "решить (по умолчанию)") {
+		t.Fatalf("дорога по умолчанию не помечена:\n%s", q)
+	}
+	if !strings.Contains(q, "инцидент: что-то сломалось прямо сейчас") {
+		t.Fatalf("описание дороги не ушло выбирающему:\n%s", q)
+	}
+	if !strings.Contains(q, "у нас всё легло") {
+		t.Fatal("реплика не ушла выбирающему")
+	}
+}
+
+func TestChoiceMapsBackToRoad(t *testing.T) {
+	p := &Profile{Pipelines: []Pipeline{
+		{Name: "решить"},
+		{Name: "разобрать инцидент", When: "что-то сломалось"},
 	}}
 
-	for _, c := range []struct{ query, want string }{
-		{"как лучше сделать кэш?", "решить"},
-		{"сервис УПАЛ ночью", "инцидент"},
-		{"Посмотри код вот тут", "ревью"},
-		{"", "решить"},
-	} {
-		got, ok := p.Pick(c.query)
-		if !ok || got.Name != c.want {
-			t.Fatalf("%q → %q, ожидали %q", c.query, got.Name, c.want)
-		}
+	name, err := ParseChoice("```json\n" + `{"road":"разобрать инцидент"}` + "\n```")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if pl, ok := p.ByName(name); !ok || pl.Name != "разобрать инцидент" {
+		t.Fatalf("имя не легло на дорогу: %+v", pl)
+	}
+	// Модель назвала несуществующую дорогу — берём дорогу по умолчанию,
+	// а не падаем: ошибка выбора должна стоить обычного маршрута.
+	if pl, ok := p.ByName("рефлексия"); !ok || pl.Name != "решить" {
+		t.Fatalf("выдуманная дорога не свелась к умолчанию: %+v", pl)
+	}
+	if _, err := ParseChoice("думаю, это инцидент"); err == nil {
+		t.Fatal("не-JSON должен быть ошибкой")
+	}
+}
 
-	// Без профиля и без дорог дороги нет — и это не ошибка.
-	if _, ok := (*Profile)(nil).Pick("что угодно"); ok {
-		t.Fatal("у nil-профиля дорог быть не может")
+func TestNoChoiceWhenThereIsNothingToChoose(t *testing.T) {
+	// Одна дорога — выбирать не из чего и платить за вызов не за что.
+	one := &Profile{Pipelines: []Pipeline{{Name: "оценить"}}}
+	if one.NeedsChoice() {
+		t.Fatal("при одной дороге выбор не нужен")
 	}
-	if _, ok := (&Profile{Name: "без дорог"}).Pick("вопрос"); ok {
-		t.Fatal("профиль без дорог не должен выбирать дорогу")
+	if (&Profile{}).NeedsChoice() {
+		t.Fatal("без дорог выбирать нечего")
+	}
+	two := &Profile{Pipelines: []Pipeline{{Name: "a"}, {Name: "b", When: "иначе"}}}
+	if !two.NeedsChoice() {
+		t.Fatal("две дороги — выбор нужен")
 	}
 }
 
@@ -72,65 +93,82 @@ func TestStageBlockNamesStages(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsDeadPipeline(t *testing.T) {
-	p := &Profile{Name: "x", Pipelines: []Pipeline{
-		{Name: "первая"},
-		{Name: "вторая"}, // без when — никогда не выберется
-	}}
-	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "недостижима") {
-		t.Fatalf("мёртвая дорога должна отвергаться: %v", err)
+func TestValidateRejectsUnusableProfiles(t *testing.T) {
+	if err := (&Profile{ID: "x"}).Validate(); err == nil {
+		t.Fatal("профиль с пустым телом должен отвергаться")
 	}
-
-	dup := &Profile{Name: "x", Pipelines: []Pipeline{
-		{Name: "одна"}, {Name: "одна", When: []string{"а"}},
+	dead := &Profile{ID: "x", About: "текст", Pipelines: []Pipeline{
+		{Name: "первая"},
+		{Name: "вторая"}, // без when — выбирающий про неё ничего не узнает
+	}}
+	if err := dead.Validate(); err == nil || !strings.Contains(err.Error(), "when") {
+		t.Fatalf("дорога без описания должна отвергаться: %v", err)
+	}
+	dup := &Profile{ID: "x", About: "текст", Pipelines: []Pipeline{
+		{Name: "одна"}, {Name: "одна", When: "иначе"},
 	}}
 	if err := dup.Validate(); err == nil {
 		t.Fatal("две дороги с одним именем должны отвергаться")
 	}
-
-	if err := (&Profile{}).Validate(); err == nil {
-		t.Fatal("пустой профиль должен отвергаться")
-	}
 }
 
-func TestFileStoreLoadsAndNoticesEdits(t *testing.T) {
+func TestFileStoreReadsMarkdownAndNoticesEdits(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "сеньор.yaml")
-	write := func(tone string) {
-		body := "name: Олег\nabout: тимлид\nstyle:\n  tone: " + tone + "\n"
+	path := filepath.Join(dir, "сеньор.md")
+	write := func(body string) {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write("сухой")
+	write("---\nname: Олег\npipelines:\n  - name: решить\n---\n\nТимлид. Отвечай сухо.\n")
 
 	st := NewFileStore(dir)
 	p, err := st.Load("сеньор")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Style.Tone != "сухой" || p.ID != "сеньор" {
-		t.Fatalf("профиль прочитан неверно: %+v", p)
+	if p.Name != "Олег" || p.ID != "сеньор" {
+		t.Fatalf("шапка прочитана неверно: %+v", p)
+	}
+	if !strings.Contains(p.About, "Тимлид. Отвечай сухо.") {
+		t.Fatalf("тело прочитано неверно: %q", p.About)
+	}
+	if len(p.Pipelines) != 1 {
+		t.Fatalf("дороги не прочитались: %+v", p.Pipelines)
 	}
 
-	// Правка файла должна действовать со следующего запроса: иначе
-	// «поправил профиль — перезапусти приложение».
-	write("подробный")
-	// mtime на Windows тикает не всегда — меняем и размер тоже.
-	if err := os.WriteFile(path, []byte("name: Олег\nabout: тимлид\nstyle:\n  tone: очень подробный\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Правка файла должна действовать со следующего запроса.
+	write("---\nname: Олег\npipelines:\n  - name: решить\n---\n\nТимлид. Отвечай очень подробно.\n")
 	p2, err := st.Load("сеньор")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p2.Style.Tone != "очень подробный" {
-		t.Fatalf("правка файла не подхватилась: %q", p2.Style.Tone)
+	if !strings.Contains(p2.About, "очень подробно") {
+		t.Fatalf("правка файла не подхватилась: %q", p2.About)
 	}
 
 	ids, err := st.List()
 	if err != nil || len(ids) != 1 || ids[0] != "сеньор" {
 		t.Fatalf("список профилей: %v %v", ids, err)
+	}
+}
+
+func TestFileStoreReadsProfileWithoutFrontmatter(t *testing.T) {
+	// Профиль без дорог — просто текстовый файл, и это нормальный профиль.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "простой.md"),
+		[]byte("Отвечай коротко и по-русски.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewFileStore(dir).Load("простой")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "простой" || len(p.Pipelines) != 0 {
+		t.Fatalf("профиль без frontmatter: %+v", p)
+	}
+	if !strings.Contains(p.Block(), "коротко") {
+		t.Fatal("тело не дошло до промпта")
 	}
 }
 
@@ -145,7 +183,7 @@ func TestLoadEmptyIDIsNotAnError(t *testing.T) {
 	}
 }
 
-func TestSampleProfilesAreValid(t *testing.T) {
+func TestRepoProfilesAreValid(t *testing.T) {
 	// Профили в репозитории — часть сдачи дня: если они перестанут
 	// читаться, демо развалится на записи, а не в тестах.
 	st := NewFileStore(filepath.Join("..", "..", "profiles"))

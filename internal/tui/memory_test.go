@@ -144,8 +144,8 @@ func profModel(t *testing.T) *Model {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"сеньор.yaml":  "name: Олег, сеньор\nabout: тимлид\nstyle:\n  tone: сухой\npipelines:\n  - name: решить\n    stages: [варианты, цена]\n",
-		"джуниор.yaml": "name: Максим, джуниор\nabout: полгода в профессии\nstyle:\n  tone: дружелюбный\n",
+		"сеньор.md":  "---\nname: Олег, сеньор\npipelines:\n  - name: решить\n    stages: [варианты, цена]\n---\n\nТимлид. Тон сухой.\n",
+		"джуниор.md": "---\nname: Максим, джуниор\n---\n\nПолгода в профессии. Тон дружелюбный.\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)

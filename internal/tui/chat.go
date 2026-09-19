@@ -582,7 +582,7 @@ func (m *Model) dumpAgent() {
 	// День 12: профиль и дорога, по которой пойдёт следующий запрос.
 	if prof := m.ag.Profile(); prof != nil {
 		m.pushLine(stDim.Render(fmt.Sprintf("  профиль  %s", prof.Summary())))
-		if pl, ok := m.ag.Pipeline(m.lastQuestion); ok {
+		if pl, ok := m.ag.Pipeline(); ok {
 			road := fmt.Sprintf("  дорога   «%s»", pl.Name)
 			if len(pl.Stages) > 0 {
 				road += ": " + strings.Join(pl.Stages, " → ")
@@ -598,7 +598,7 @@ func (m *Model) dumpAgent() {
 				road += " · " + strings.Join(extra, " · ")
 			}
 			m.pushLine(stDim.Render(road))
-			m.pushLine(stDim.Render("           (дорога выбирается по тексту запроса — здесь по последнему)"))
+			m.pushLine(stDim.Render("           (под каждый запрос дорогу выбирает короткий вызов модели; здесь — по умолчанию)"))
 		}
 	}
 	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос

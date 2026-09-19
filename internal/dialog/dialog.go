@@ -145,7 +145,6 @@ func Load(path string) (*Scenario, error) {
 	return &s, nil
 }
 
-
 // Command — команда веток строки или пусто, если это реплика.
 func (l Line) Command() string {
 	switch {

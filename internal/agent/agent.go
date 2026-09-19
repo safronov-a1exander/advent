@@ -303,7 +303,8 @@ func (a *Agent) Messages(text string) []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	system, past := window(a.cfg, a.history, a.summary, a.facts)
-	pl, picked := a.prof.Pick(text)
+	// Отладочный вид не ходит в API: показываем дорогу по умолчанию.
+	pl, picked := a.prof.Default()
 	system = withMemory(system, profileBlocks(a.prof, pl, picked))
 	system = withMemory(system, a.memoryBlocks(a.cfg, a.mem))
 	return compose(system, past, text)
@@ -375,9 +376,9 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// вопрос уходит уже с обновлённой рабочей и долговременной памятью.
 	a.route(ctx, cfg, mem, hist, text, gen, &turn, on)
 
-	// День 12: дорога профиля выбирается по тексту запроса и накладывается
-	// на копию конфига — стратегия рассуждения и класс модели.
-	pl, picked := prof.Pick(text)
+	// День 12: дорогу под запрос выбирает короткий вызов модели, и она
+	// накладывается на копию конфига — стратегия рассуждения и класс модели.
+	pl, picked := a.pickRoad(ctx, cfg, prof, text, &turn, on)
 	cfg = applyPipeline(cfg, pl, picked, catalog)
 	if picked && pl.Name != "" {
 		on(Event{Kind: EventPipeline, Label: pl.Name, Content: strings.Join(pl.Stages, " → ")})

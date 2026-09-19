@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
+	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/profile"
 )
 
@@ -44,14 +46,56 @@ func (a *Agent) SetProfile(p *profile.Profile) {
 	a.mu.Unlock()
 }
 
-// Pipeline — дорога, по которой пойдёт этот запрос, и есть ли она вообще.
-// Нужна интерфейсу: пользователь должен видеть, куда его запрос свернул,
-// до того как получит ответ.
-func (a *Agent) Pipeline(query string) (profile.Pipeline, bool) {
+// Pipeline — дорога без обращения к модели: по умолчанию. Нужна
+// интерфейсу, который показывает состояние агента, а не гоняет запрос.
+func (a *Agent) Pipeline() (profile.Pipeline, bool) {
 	a.mu.Lock()
 	p := a.prof
 	a.mu.Unlock()
-	return p.Pick(query)
+	return p.Default()
+}
+
+// pickRoad выбирает дорогу под запрос коротким вызовом модели.
+//
+// Вызов идёт, только когда дорог больше одной: при единственной выбирать
+// не из чего. Любой сбой — не ошибка хода, а дорога по умолчанию: ошибка
+// выбора должна стоить обычного маршрута, а не потерянного ответа.
+func (a *Agent) pickRoad(ctx context.Context, cfg Config, p *profile.Profile, text string,
+	turn *Turn, on func(Event),
+) (profile.Pipeline, bool) {
+	if p == nil {
+		return profile.Pipeline{}, false
+	}
+	if !p.NeedsChoice() {
+		return p.Default()
+	}
+	req := llm.Request{
+		Model: cfg.Model,
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: profile.ChooseSystem},
+			{Role: llm.RoleUser, Content: profile.ChoosePrompt(p, text)},
+		},
+		Temperature:    llm.F(0),
+		Thinking:       &llm.Thinking{Type: "disabled"},
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
+	}
+	resp, err := a.client.Chat(ctx, req)
+	a.record(req, resp, err, "выбор дороги", true)
+	a.accountAux(resp, err)
+	if err != nil {
+		on(Event{Kind: EventPipeline, Label: "выбор дороги не удался — идём по умолчанию", Content: err.Error()})
+		return p.Default()
+	}
+	turn.AuxCalls++
+	turn.AuxPrompt += resp.Usage.PromptTokens
+	turn.AuxCompletion += resp.Usage.CompletionTokens
+
+	name, err := profile.ParseChoice(resp.Content)
+	if err != nil {
+		on(Event{Kind: EventPipeline, Label: "выбор дороги ответил не JSON — идём по умолчанию", Content: err.Error()})
+		return p.Default()
+	}
+	return p.ByName(name)
 }
 
 // profileBlocks — блоки профиля и выбранной дороги для системного промпта.

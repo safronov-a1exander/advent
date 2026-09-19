@@ -15,11 +15,14 @@ import (
 // Хранилище профилей (день 12).
 //
 // Профиль — конфиг, а не данные, поэтому лежит он не там, где память:
-// каталог `profiles/`, YAML, файл на профиль. Лекция предлагала MD-файлы,
-// и по сути это то же самое — текст, который человек правит руками и
-// кладёт в репозиторий. YAML взят потому, что у профиля есть структура
-// (стиль отдельно, ограничения отдельно, дороги отдельно), и в этом
-// проекте так описаны и сценарии, и флот агентов.
+// каталог `profiles/`, markdown, файл на профиль. Тело файла — проза
+// о собеседнике, необязательный frontmatter — дороги.
+//
+// Первая версия была YAML со схемой из семи полей под ту же прозу.
+// Схема ничего не проверяла, читалась в одном месте и там же склеивалась
+// обратно в строки, зато требовала кавычек вокруг каждой фразы
+// с двоеточием. Лекция, кстати, с самого начала говорила про MD-файлы —
+// и `CLAUDE.md` с `.cursor/rules/*.mdc` устроены именно так.
 //
 // Читается профиль при каждом обращении, а не один раз при старте:
 // правка файла должна действовать со следующего запроса, иначе
@@ -58,7 +61,7 @@ func (s *FileStore) Dir() string { return s.dir }
 
 // Path — файл профиля.
 func (s *FileStore) Path(id string) string {
-	return filepath.Join(s.dir, safeName(id)+".yaml")
+	return filepath.Join(s.dir, safeName(id)+".md")
 }
 
 // safeName — id, пригодный для имени файла.
@@ -104,15 +107,21 @@ func (s *FileStore) Load(id string) (*Profile, error) {
 	}
 	s.mu.Unlock()
 
-	b, err := os.ReadFile(path)
+	body, front, err := readMarkdown(path)
 	if err != nil {
 		return nil, err
 	}
 	var p Profile
-	if err := yaml.Unmarshal(b, &p); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	if len(front) > 0 {
+		if err := yaml.Unmarshal(front, &p); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 	}
 	p.ID = id
+	p.About = body
+	if p.Name == "" {
+		p.Name = id
+	}
 	if err := p.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -135,37 +144,37 @@ func (s *FileStore) List() ([]string, error) {
 	var out []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
+		if e.IsDir() || !strings.HasSuffix(name, ".md") {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(strings.TrimSuffix(name, ".yml"), ".yaml"))
+		out = append(out, strings.TrimSuffix(name, ".md"))
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// Save пишет профиль в файл. Нужен команде `advent profile -init`:
-// первый профиль удобнее получить готовым и поправить, чем сочинять
-// структуру YAML по документации.
-func (s *FileStore) Save(p *Profile) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return err
-	}
-	b, err := yaml.Marshal(p)
+// readMarkdown делит файл на frontmatter и тело. Формат тот же, что у всех:
+// три дефиса, YAML, три дефиса, дальше текст. Файла без frontmatter это
+// не касается — он весь целиком тело, и это нормальный профиль.
+func readMarkdown(path string) (body string, front []byte, err error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
-	path := s.Path(p.ID)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+	text := strings.ReplaceAll(string(b), "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return strings.TrimSpace(text), nil, nil
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	rest := text[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return "", nil, fmt.Errorf("%s: frontmatter открыт, но не закрыт строкой ---", path)
 	}
-	delete(s.cache, p.ID)
-	return nil
+	tail := rest[end+len("\n---"):]
+	if i := strings.Index(tail, "\n"); i >= 0 {
+		tail = tail[i+1:]
+	} else {
+		tail = ""
+	}
+	return strings.TrimSpace(tail), []byte(rest[:end]), nil
 }

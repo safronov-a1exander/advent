@@ -111,7 +111,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 9 | `контекст` (полная история / summary), `хвост как есть`, `сжимать каждые`; флаги `-context`, `-keep-last`, `-summarize-every` |
 | день 10 | `контекст` дополнился sliding window и sticky facts; ветки разговора — `Ctrl+B`; в сценарии `advent dialog` — команды `checkpoint`/`branch`/`switch` и `branches: true` у варианта |
 | день 11 | `память` (выкл / руками / агентом), `юзер`, `задача`, `слои в промпт`; слои — `Ctrl+M`, запись из поля ввода `/user ключ = значение`; флаги `-memory`, `-user`, `-task`, `-memory-scopes`, `-memory-dir`; команда `advent memory`; в сценарии — `newchat` и `remember` |
-| день 12 | `профиль` — файлы из `profiles/*.yaml`: стиль, ограничения и дороги запросов; `/profile <id>` из поля ввода; флаги `-profile`, `-profiles-dir`; команда `advent profile`; в сценарии — `forbid` и `expect_by` |
+| день 12 | `профиль` — файлы из `profiles/*.md`: стиль, ограничения и дороги запросов; `/profile <id>` из поля ввода; флаги `-profile`, `-profiles-dir`; команда `advent profile`; в сценарии — `forbid` и `expect_by` |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.
