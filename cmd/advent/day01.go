@@ -56,8 +56,9 @@ type askFlags struct {
 	invariantSet  string
 	invariantsDir string
 
-	// Состояние задачи (день 13).
+	// Состояние задачи (день 13) и карта переходов (день 15).
 	taskState string
+	taskMap   string
 	tasksDir  string
 
 	// Профиль пользователя (день 12).
@@ -92,6 +93,7 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.invariantSet, "invariant-set", "", "набор правил: имя файла из invariants/ без расширения")
 	fs.StringVar(&a.invariantsDir, "invariants-dir", "", "каталог наборов инвариантов (по умолчанию invariants_dir из config.yaml)")
 	fs.StringVar(&a.taskState, "task-state", "", "состояние задачи для chat/demo: пусто — без стадий, manual — двигает пользователь, auto — плюс служебный вызов")
+	fs.StringVar(&a.taskMap, "task-map", "", "карта переходов: пусто — проверяет код, prompt — правила только в промпте (для сравнения)")
 	fs.StringVar(&a.tasksDir, "tasks-dir", "", "каталог состояний задач (по умолчанию tasks_dir из config.yaml)")
 	fs.StringVar(&a.profileID, "profile", "", "профиль пользователя для chat/demo: имя файла из profiles/ без расширения")
 	fs.StringVar(&a.profileDir, "profiles-dir", "", "каталог профилей (по умолчанию profiles_dir из config.yaml)")
@@ -343,6 +345,12 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		return fmt.Errorf("-task-state: ожидали пусто, manual или auto, получили %q", a.taskState)
 	}
 	set.TaskState = a.taskState
+	// День 15: карта переходов проверяется кодом. Режим prompt оставляет
+	// правила только в тексте — им меряют, хватает ли инструкции.
+	if a.taskMap != agent.TaskMapCode && a.taskMap != agent.TaskMapPrompt {
+		return fmt.Errorf("-task-map: ожидали пусто или prompt, получили %q", a.taskMap)
+	}
+	set.TaskMap = a.taskMap
 	pool.SetTaskStore(task.NewFileStore(a.tasksStoreDir()))
 
 	// День 14: инварианты — рамки проекта; они в репозитории рядом с кодом.

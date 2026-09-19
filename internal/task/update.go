@@ -31,11 +31,16 @@ import (
 // UpdateSystem — инструкция продвижения.
 const UpdateSystem = `Ты следишь за состоянием рабочей задачи и после каждого хода решаешь, что в нём изменилось.
 
-Стадии задачи идут строго по порядку:
+Стадии задачи:
 - planning — собираем требования и согласуем план; заканчивается, когда пользователь явно одобрил план;
 - execution — делаем по утверждённому плану; заканчивается, когда все шаги плана сделаны;
 - validation — проверяем сделанное; заканчивается, когда проверка пройдена или найденное исправлено;
 - done — задача закрыта.
+
+Вперёд стадии идут по порядку, но назад ходить можно и нужно: если на проверке
+выяснилось, что работа не доделана, предложи "advance": "execution"; если план
+оказался неверным — "advance": "planning". Прыгать через стадию нельзя: такое
+предложение всё равно отклонит код.
 
 Тебе дают текущее состояние, последний вопрос пользователя и ответ ассистента.
 Верни JSON — только то, что изменилось:
@@ -89,10 +94,19 @@ func UpdatePrompt(t *Task, question, answer string) string {
 }
 
 // ParseUpdate читает ответ служебного вызова.
+//
+// Это место красного пути дня 15: «LLM вернула прозу вместо чёткого ответа,
+// и вся цепочка сломалась». Ломаться тут нечему — состояние просто не
+// изменится, — но прозу вокруг JSON стоит пережить: модель любит
+// поздороваться перед объектом и попрощаться после.
 func ParseUpdate(raw string) (Update, error) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimSuffix(strings.TrimPrefix(raw, "```"), "```")
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "{") {
+		raw = firstObject(raw)
+	}
 	var u Update
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &u); err != nil {
 		return Update{}, fmt.Errorf("продвижение задачи не в JSON: %w", err)
@@ -107,9 +121,9 @@ func ParseUpdate(raw string) (Update, error) {
 }
 
 // Apply переносит предложение в задачу и возвращает описание изменений
-// для ленты. Куда можно переходить, решает Allow — на тринадцатом дне
-// это движение вперёд по списку стадий.
-func (t *Task) Apply(u Update) string {
+// для ленты. Куда можно переходить, решает карта: служебный вызов
+// предлагает, Move разрешает или отказывает.
+func (t *Task) Apply(u Update, tr Transitions) string {
 	if t == nil || u.Empty() {
 		return ""
 	}
@@ -133,26 +147,43 @@ func (t *Task) Apply(u Update) string {
 		parts = append(parts, "ждём: "+u.Expect)
 	}
 	if u.Advance != "" && u.Advance != t.State {
-		if !Allow(t.State, u.Advance) {
-			// Предложение отвергнуто кодом. На тринадцатом дне это редкость
-			// (вперёд по списку разрешено всё), на пятнадцатом станет
-			// основным содержанием дня.
-			parts = append(parts, fmt.Sprintf("переход %s → %s отклонён", t.State, u.Advance))
+		from := t.State
+		if err := t.Move(u.Advance, u.Why, tr); err != nil {
+			// Отказ показывается так же подробно, как переход. Это ответ
+			// на «почему задача не двигается», и его читает человек.
+			parts = append(parts, err.Error())
 		} else {
-			from := t.State
-			_ = t.Advance(u.Advance, u.Why)
 			parts = append(parts, fmt.Sprintf("стадия %s → %s", from, u.Advance))
 		}
 	}
 	return strings.Join(parts, " · ")
 }
 
-// Allow — разрешён ли переход. День 13: только вперёд и только на
-// следующую стадию — линейный happy path. День 15 заменит это картой
-// с откатами и запретами.
-func Allow(from, to State) bool {
-	if !from.Valid() || !to.Valid() {
-		return false
+// firstObject достаёт первый объект верхнего уровня из текста вокруг.
+// Скобки считаются со знанием строк: "{" внутри значения не считается.
+func firstObject(raw string) string {
+	start := strings.IndexByte(raw, '{')
+	if start < 0 {
+		return raw
 	}
-	return Next(from) == to
+	depth, inStr, esc := 0, false, false
+	for i := start; i < len(raw); i++ {
+		c := raw[i]
+		switch {
+		case esc:
+			esc = false
+		case c == '\\':
+			esc = inStr
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth == 0 {
+				return raw[start : i+1]
+			}
+		}
+	}
+	return raw
 }

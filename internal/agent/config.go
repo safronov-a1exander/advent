@@ -69,6 +69,13 @@ type Config struct {
 	// служебный вызов продвижения). Ключ задачи — то же поле Task, что
 	// и у рабочего слоя памяти: это одна и та же задача с двух сторон.
 	TaskState string `yaml:"task_state" json:"task_state,omitempty"`
+	// TaskMap — проверяет ли код карту переходов (день 15): "" — проверяет,
+	// "prompt" — правила остаются только в тексте промпта.
+	//
+	// Ручка нужна не для работы, а для сравнения: вопрос дня в том, хватает
+	// ли правил в инструкции, и ответить на него можно, только убрав их
+	// из кода. В обычной жизни поворачивать её незачем.
+	TaskMap string `yaml:"task_map" json:"task_map,omitempty"`
 
 	// Profile — id профиля пользователя (день 12): profiles/<id>.yaml.
 	// Пусто — без профиля, агент работает как на одиннадцатом дне.
@@ -184,7 +191,11 @@ func (c Config) Summary() string {
 		parts = append(parts, "профиль: "+c.Profile)
 	}
 	if c.TaskState != "" {
-		parts = append(parts, "стадии: "+c.TaskState)
+		st := "стадии: " + c.TaskState
+		if c.TaskMap == TaskMapPrompt {
+			st += " · карта только в промпте"
+		}
+		parts = append(parts, st)
 	}
 	if c.Invariants != "" {
 		inv := "инварианты: " + c.Invariants
@@ -272,6 +283,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.TaskState != "" {
 		out.TaskState = top.TaskState
+	}
+	if top.TaskMap != "" {
+		out.TaskMap = top.TaskMap
 	}
 	if top.Invariants != "" {
 		out.Invariants = top.Invariants

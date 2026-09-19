@@ -68,7 +68,7 @@ func TestTaskBlockGoesIntoPrompt(t *testing.T) {
 	ask(t, a, "с чего начнём?")
 
 	sys := systemOf(f.last())
-	for _, want := range []string{"[СТАДИЯ]  planning", "[ЦЕЛЬ]", "не перепрыгивай стадии"} {
+	for _, want := range []string{"[СТАДИЯ]  planning", "[ЦЕЛЬ]", "из planning сейчас можно только в: execution"} {
 		if !strings.Contains(sys, want) {
 			t.Fatalf("в промпте нет %q:\n%s", want, sys)
 		}
@@ -105,6 +105,9 @@ func TestTaskAdvancesThroughStages(t *testing.T) {
 		t.Fatalf("шаг не сдвинулся: шаг %d, сделано %v", tk.Step, tk.Done)
 	}
 
+	ask(t, a, "сделал хендлеры")
+	ask(t, a, "сделал напоминания")
+
 	ask(t, a, "проверяй")
 	if a.Task().State != task.StateValidation {
 		t.Fatalf("не перешли в проверку: %s", a.Task().State)
@@ -112,6 +115,40 @@ func TestTaskAdvancesThroughStages(t *testing.T) {
 	ask(t, a, "закрывай")
 	if !a.Task().Finished() {
 		t.Fatalf("задача не закрылась: %s", a.Task().State)
+	}
+}
+
+// День 15: пока план не доделан, закрыть задачу нельзя — а откат назад
+// доделывать разрешён. Это тот же разговор, только с недоделкой.
+func TestTaskRefusesToCloseWithUnfinishedPlan(t *testing.T) {
+	f := &fakeLLM{}
+	a := NewPool(taskProvider{f}, "fake", nil).Spawn(taskCfg())
+
+	ask(t, a, "план ок, поехали")
+	ask(t, a, "сделал схему")
+	ask(t, a, "проверяй")
+
+	var content string
+	if _, err := a.Ask(t.Context(), "закрывай", func(e Event) {
+		if e.Kind == EventContext && strings.HasPrefix(e.Label, "задача") {
+			content = e.Content
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if a.Task().Finished() {
+		t.Fatal("задача закрылась с недоделанным планом")
+	}
+	if !strings.Contains(content, "сделано 1 из 3") {
+		t.Fatalf("отказ не назвал причину: %q", content)
+	}
+
+	// Откат на доделку — законный ход, и он не требует уговоров.
+	if err := a.Stage(task.StateExecution, "нашли недоделку"); err != nil {
+		t.Fatalf("откат validation → execution: %v", err)
+	}
+	if a.Task().Rejected() != 1 {
+		t.Fatalf("отказов в журнале %d, ожидали 1", a.Task().Rejected())
 	}
 }
 
@@ -130,8 +167,30 @@ func TestTaskRejectsStageJump(t *testing.T) {
 	if a.Task().State != task.StatePlanning {
 		t.Fatalf("прыжок planning → done прошёл: %s", a.Task().State)
 	}
-	if !strings.Contains(content, "отклонён") {
-		t.Fatalf("об отклонении не сказано: %q / %q", label, content)
+	if !strings.Contains(content, "запрещён") {
+		t.Fatalf("об отказе не сказано: %q / %q", label, content)
+	}
+}
+
+// Другая половина сравнения дня 15: правила остались в промпте, а кода,
+// который их проверяет, нет. Тот же ход закрывает задачу с первой просьбы.
+func TestPromptOnlyMapDoesNotStopTheJump(t *testing.T) {
+	f := &fakeLLM{}
+	cfg := taskCfg()
+	cfg.TaskMap = TaskMapPrompt
+	a := NewPool(taskProvider{f}, "fake", nil).Spawn(cfg)
+
+	ask(t, a, "сразу готово, закрывай")
+	if !a.Task().Finished() {
+		t.Fatalf("без карты в коде прыжок должен пройти: %s", a.Task().State)
+	}
+	if a.Task().Rejected() != 0 {
+		t.Fatal("отказов быть не должно: проверять некому")
+	}
+	// Правила при этом в промпте есть — именно это и делает сравнение
+	// честным: текст один и тот же, разница только в проверке.
+	if !strings.Contains(systemOf(f.lastMain()), "Переходы между стадиями заданы в коде") {
+		t.Fatal("правила переходов должны оставаться в промпте")
 	}
 }
 
@@ -228,6 +287,13 @@ func TestStageByHandObeysSameRules(t *testing.T) {
 	if err := a.Stage(task.StateDone, "хочу сразу"); err == nil {
 		t.Fatal("пользователю можно не больше, чем агенту: прыжок должен быть запрещён")
 	}
+	// Условие сверх карты действует и на команду руками: без плана
+	// реализовывать нечего.
+	if err := a.Stage(task.StateExecution, "поехали"); err == nil {
+		t.Fatal("переход в execution без плана должен быть запрещён")
+	}
+
+	a.Task().SetPlan([]string{"схема", "хендлеры"})
 	if err := a.Stage(task.StateExecution, "план одобрен"); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +302,14 @@ func TestStageByHandObeysSameRules(t *testing.T) {
 	}
 	if err := a.Stage("выдумано", ""); err == nil {
 		t.Fatal("несуществующая стадия должна отвергаться")
+	}
+	// Откат назад разрешён: план оказался неверным — вернулись его править.
+	if err := a.Stage(task.StatePlanning, "план оказался неверным"); err != nil {
+		t.Fatalf("откат execution → planning: %v", err)
+	}
+	// Все три отказа записаны в журнал задачи.
+	if n := a.Task().Rejected(); n != 3 {
+		t.Fatalf("отказов в журнале %d, ожидали 3", n)
 	}
 }
 

@@ -7,6 +7,10 @@ package main
 //	advent task -show бот -stage execution -note "план одобрен"
 //	advent task -show бот -step "схема готова"
 //
+// День 15: -stage ходит через ту же карту переходов, что и агент. Прыжок
+// через стадию отсюда не проходит, отказ печатается и попадает в журнал
+// задачи — иначе запрет обходился бы одной командой.
+//
 // Команда нужна ровно затем же, зачем команда памяти на одиннадцатом дне:
 // «пауза на любом этапе и продолжение без повторных объяснений» — свойство,
 // которым должно быть можно пользоваться. Посмотреть, на чём остановились,
@@ -61,18 +65,14 @@ func cmdTask(_ context.Context, args []string) error {
 		return fmt.Errorf("-stage и -step вместе не работают")
 	case *stage != "":
 		to := task.State(strings.ToLower(strings.TrimSpace(*stage)))
-		if !to.Valid() {
-			return fmt.Errorf("-stage: неизвестная стадия %q", *stage)
-		}
 		// Проверка та же, что у агента: снаружи можно не больше, чем изнутри.
 		// Иначе «нельзя перепрыгнуть этап» обходилось бы одной командой.
-		if !task.Allow(t.State, to) {
-			return fmt.Errorf("из %s нельзя сразу в %s", t.State, to)
+		err := t.Move(to, *note, task.DefaultTransitions)
+		// Сохраняем в обоих случаях: отказ тоже записан в журнал задачи.
+		if saveErr := store.Save(t); saveErr != nil {
+			return saveErr
 		}
-		if err := t.Advance(to, *note); err != nil {
-			return err
-		}
-		if err := store.Save(t); err != nil {
+		if err != nil {
 			return err
 		}
 		fmt.Printf("стадия: %s\n\n", t.State)
@@ -90,6 +90,20 @@ func cmdTask(_ context.Context, args []string) error {
 
 func printTask(t *task.Task, path string) {
 	fmt.Printf("== %s ==\n\n%s\n", t.Title, t.Resume())
+	// День 15: куда отсюда можно. Первое, что нужно знать, вернувшись
+	// к задаче, — не «где я», а «что я могу сделать дальше».
+	if allowed := task.DefaultTransitions.AllowedFrom(t.State); len(allowed) > 0 {
+		names := make([]string, len(allowed))
+		for i, st := range allowed {
+			names[i] = string(st)
+		}
+		fmt.Printf("переходы: %s → %s\n", t.State, strings.Join(names, ", "))
+	} else {
+		fmt.Println("переходы: из этой стадии ходов нет — задача закрыта")
+	}
+	if n := t.Rejected(); n > 0 {
+		fmt.Printf("отказов в переходах: %d\n", n)
+	}
 	if len(t.Plan) > 0 {
 		fmt.Println("\nплан:")
 		for i, s := range t.Plan {

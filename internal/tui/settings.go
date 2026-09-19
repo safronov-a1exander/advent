@@ -43,6 +43,11 @@ type Settings struct {
 
 	// День 13 — режим состояния задачи.
 	TaskState string
+	// День 15 — проверяет ли код карту переходов. Ручки в панели нет:
+	// поворачивают её из командной строки и сценариев, когда меряют,
+	// хватает ли правил в промпте. Здесь поле живёт, чтобы режим доезжал
+	// до агента и был виден в Ctrl+D.
+	TaskMap string
 
 	// День 14 — инварианты: режим проверки, набор и список доступных.
 	Invariants   string
@@ -422,6 +427,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		SummarizeEvery: s.SummarizeEvery,
 		Profile:        s.Profile,
 		TaskState:      s.TaskState,
+		TaskMap:        s.TaskMap,
 		Invariants:     s.Invariants,
 		InvariantSet:   s.InvariantSet,
 		Memory:         s.Memory,
@@ -451,6 +457,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.SummarizeEvery = c.SummarizeEvery
 	s.Profile = c.Profile
 	s.TaskState = c.TaskState
+	s.TaskMap = c.TaskMap
 	s.Invariants = c.Invariants
 	s.InvariantSet = c.InvariantSet
 	s.Memory = c.Memory
