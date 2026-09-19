@@ -3,6 +3,7 @@ package task
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Контролируемые переходы (день 15).
@@ -184,7 +185,7 @@ func (t *Task) Move(to State, note string, tr Transitions) error {
 		// Отказ — тоже событие задачи. Без записи в журнале остаётся
 		// впечатление, что ничего не происходило, а на самом деле кто-то
 		// пытался срезать угол.
-		t.Log = append(t.Log, Event{At: t.Updated, From: t.State, Note: "отклонено: " + err.Error()})
+		t.Log = append(t.Log, Event{At: time.Now(), From: t.State, Note: "отклонено: " + err.Error()})
 		return err
 	}
 	return t.Advance(to, note)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Карта: что разрешено, что нет и что откат.
@@ -123,10 +124,18 @@ func TestRejectionsAreLogged(t *testing.T) {
 	if !strings.HasPrefix(tk.Log[1].Note, "отклонено:") {
 		t.Fatalf("запись отказа: %q", tk.Log[1].Note)
 	}
+	// Время отказа — настоящее. Первая версия ставила t.Updated, и у задачи,
+	// прочитанной из файла, все отказы вставали меткой последней правки.
+	past := time.Now().Add(-time.Hour)
+	tk.Updated = past
+	_ = tk.Move(StateValidation, "", DefaultTransitions)
+	if at := tk.Log[len(tk.Log)-1].At; at.Equal(past) {
+		t.Fatalf("время отказа взято из Updated: %s", at)
+	}
 	// Успешный переход отказом не считается.
 	tk.SetPlan([]string{"шаг"})
 	_ = tk.Move(StateExecution, "план утверждён", DefaultTransitions)
-	if tk.Rejected() != 2 {
+	if tk.Rejected() != 3 {
 		t.Fatalf("успешный переход посчитали отказом: %d", tk.Rejected())
 	}
 }
