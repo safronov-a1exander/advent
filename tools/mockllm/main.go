@@ -116,6 +116,8 @@ func main() {
 			source, sep = []string{mockFacts(req.Messages)}, ""
 		case routeRequest(req.Messages):
 			source, sep = []string{mockRoute(req.Messages)}, ""
+		case taskRequest(req.Messages):
+			source, sep = []string{mockTask(req.Messages)}, ""
 		case wantJSON:
 			source, sep = chunkJSON(sampleJSON), ""
 		case recallQuestion(req.Messages):
@@ -288,6 +290,36 @@ func mockRoute(msgs []message) string {
 		remember = append(remember, change{Scope: "task", Key: "сказано", Value: msg})
 	}
 	b, _ := json.Marshal(map[string]any{"remember": remember, "forget": []change{}})
+	return string(b)
+}
+
+// taskRequest — служебный запрос продвижения задачи (день 13).
+func taskRequest(msgs []message) bool {
+	return len(msgs) >= 2 && strings.HasPrefix(msgs[0].Content, "Ты следишь за состоянием рабочей задачи")
+}
+
+// mockTask — продвижение без модели. Слово «утверждён» в реплике закрывает
+// планирование и кладёт план, «готов»/«сделал» отмечает шаг. Этого хватает,
+// чтобы на репетиции прошёл весь путь: служебный вызов, JSON с разницей,
+// блок состояния в следующем запросе.
+func mockTask(msgs []message) string {
+	_, q, _ := strings.Cut(msgs[1].Content, "Вопрос пользователя:")
+	q, _, _ = strings.Cut(q, "Ответ ассистента:")
+	q = strings.ToLower(strings.Join(strings.Fields(q), " "))
+
+	u := map[string]any{}
+	switch {
+	case strings.Contains(q, "утвержд") || strings.Contains(q, "приступай"):
+		u["plan"] = []string{"схема базы", "хендлеры", "слоты", "напоминания", "тесты"}
+		u["advance"] = "execution"
+		u["current"] = "схема базы"
+		u["why"] = "план утверждён"
+	case strings.Contains(q, "готов") || strings.Contains(q, "сделал"):
+		u["completed"] = q
+	case strings.Contains(q, "заверш") || strings.Contains(q, "закрыт"):
+		u["advance"] = "done" // попытка прыгнуть через validation
+	}
+	b, _ := json.Marshal(u)
 	return string(b)
 }
 

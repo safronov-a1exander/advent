@@ -9,6 +9,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/task"
 )
 
 // Слои памяти в интерфейсе (день 11).
@@ -121,6 +122,15 @@ func (m *Model) memoryCommand(text string) bool {
 		m.profileCommand(rest)
 		return true
 	}
+	// День 13: стадии задачи двигаются теми же командами из поля ввода.
+	if head == "stage" {
+		m.stageCommand(rest)
+		return true
+	}
+	if head == "step" {
+		m.stepCommand(rest)
+		return true
+	}
 	if head == "forget" {
 		scope, key, _ := strings.Cut(rest, " ")
 		m.forgetCommand(memory.Scope(strings.ToLower(strings.TrimSpace(scope))), strings.TrimSpace(key))
@@ -175,6 +185,46 @@ func (m *Model) profileCommand(id string) {
 			m.pushLine(stDim.Render("   дорога по умолчанию «" + pl.Name + "»: " + strings.Join(pl.Stages, " → ")))
 		}
 	}
+	m.refresh()
+}
+
+// stageCommand переводит задачу в стадию. Без аргумента — показывает,
+// на чём остановились: чаще всего именно это и нужно, когда вернулся.
+func (m *Model) stageCommand(arg string) {
+	tk := m.ag.Task()
+	if tk == nil {
+		m.flash = "у агента нет задачи — включи поле «задача» в панели (Ctrl+P)"
+		return
+	}
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		m.pushLine("")
+		m.pushLine(stNote.Render("◆ " + tk.Resume()))
+		m.refresh()
+		return
+	}
+	to, note, _ := strings.Cut(arg, " ")
+	if err := m.ag.Stage(task.State(strings.ToLower(strings.TrimSpace(to))), strings.TrimSpace(note)); err != nil {
+		m.flash = err.Error()
+		return
+	}
+	m.pushLine("")
+	m.pushLine(stNote.Render("◆ стадия: " + m.ag.Task().Summary()))
+	m.refresh()
+}
+
+// stepCommand отмечает шаг сделанным.
+func (m *Model) stepCommand(what string) {
+	if m.ag.Task() == nil {
+		m.flash = "у агента нет задачи"
+		return
+	}
+	if err := m.ag.Step(strings.TrimSpace(what)); err != nil {
+		m.flash = err.Error()
+		return
+	}
+	m.pushLine("")
+	m.pushLine(stNote.Render("◆ шаг закрыт: " + m.ag.Task().Summary()))
 	m.refresh()
 }
 

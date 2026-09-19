@@ -22,6 +22,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/task"
 )
 
 // Scenario — описание прогона.
@@ -67,6 +68,9 @@ type Line struct {
 	NewChat string `yaml:"newchat"`
 	// Remember — положить запись руками: "user/ключ = значение".
 	Remember string `yaml:"remember"`
+	// Stage — перевести задачу в стадию руками (день 13). Варианты без
+	// задачи команду пропускают.
+	Stage string `yaml:"stage"`
 
 	// Expect — подстроки, которые обязаны быть в ответе (без учёта регистра).
 	// Реплики с проверками — это вопросы на память о раннем разговоре.
@@ -126,7 +130,7 @@ func Load(path string) (*Scenario, error) {
 	}
 	for i, l := range s.Dialog {
 		commands := 0
-		for _, c := range []string{l.Checkpoint, l.Branch, l.Switch, l.NewChat, l.Remember} {
+		for _, c := range []string{l.Checkpoint, l.Branch, l.Switch, l.NewChat, l.Remember, l.Stage} {
 			if strings.TrimSpace(c) != "" {
 				commands++
 			}
@@ -158,6 +162,8 @@ func (l Line) Command() string {
 		return "новый разговор: " + l.NewChat
 	case l.Remember != "":
 		return "запомнить: " + l.Remember
+	case l.Stage != "":
+		return "стадия: " + l.Stage
 	}
 	return ""
 }
@@ -171,7 +177,9 @@ type Step struct {
 	Command string
 	// Branch — в какой ветке шёл ход.
 	Branch string
-	Turn   agent.Turn
+	// State — в какой стадии задачи шёл ход (день 13).
+	State string
+	Turn  agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
 	Passed  bool
@@ -193,6 +201,8 @@ type Result struct {
 	Layers map[memory.Scope][]memory.Entry
 	// BranchList — ветки агента к концу прогона, если вариант ветвился.
 	BranchList []agent.BranchInfo
+	// Task — состояние задачи к концу прогона (день 13).
+	Task *task.Task
 }
 
 // Totals — итоги варианта.
@@ -279,7 +289,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			progress(cfg.Name, i+1, len(lines))
 		}
 		if cmd := l.Command(); cmd != "" {
-			if l.NewChat != "" || l.Remember != "" {
+			if l.NewChat != "" || l.Remember != "" || l.Stage != "" {
 				res.Steps = append(res.Steps, runMemoryCommand(a, l, cmd))
 			} else {
 				res.Steps = append(res.Steps, runCommand(a, l, cmd, branches))
@@ -289,7 +299,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty(), Branch: a.ActiveBranch()}
+		st := Step{Say: l.Say, Checked: !want.Empty(), Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -306,6 +316,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		res.Steps = append(res.Steps, st)
 	}
 	res.Elapsed = time.Since(start)
+	res.Task = a.Task().Clone()
 	res.Summary, _ = a.Summary()
 	res.Facts = a.Facts()
 	if mem := a.Memory(); mem != nil {
@@ -322,6 +333,14 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 	return res
 }
 
+// stateOf — стадия задачи агента или пусто, если задачи нет.
+func stateOf(a *agent.Agent) string {
+	if t := a.Task(); t != nil {
+		return string(t.State)
+	}
+	return ""
+}
+
 // Brief — ячейка хода для таблиц: токены запроса, служебные вызовы, ветка
 // и проверка. sent — добавить, сколько сообщений истории ушло с вопросом.
 func (st Step) Brief(sent bool) string {
@@ -336,6 +355,8 @@ func (st Step) Brief(sent bool) string {
 			return "↺"
 		case strings.HasPrefix(st.Command, "запомнить"):
 			return "🧠"
+		case strings.HasPrefix(st.Command, "стадия"):
+			return "◆ " + st.State
 		}
 		return "→ " + st.Branch
 	}
@@ -348,6 +369,9 @@ func (st Step) Brief(sent bool) string {
 	}
 	if st.Branch != "" && st.Branch != agent.MainBranch {
 		c += " [" + st.Branch + "]"
+	}
+	if st.State != "" {
+		c += " ◆" + st.State
 	}
 	if st.Checked {
 		if st.Passed {
@@ -362,6 +386,8 @@ func (st Step) Brief(sent bool) string {
 // Text — реплика строки или её команда для таблиц.
 func (l Line) Text() string {
 	switch {
+	case l.Stage != "":
+		return "◆ " + l.Command()
 	case l.NewChat != "" || l.Remember != "":
 		return "🧠 " + l.Command()
 	case l.Command() != "":
@@ -429,10 +455,15 @@ func runCommand(a *agent.Agent, l Line, cmd string, branches bool) Step {
 // приём одного варианта, и вариант без памяти должен пройти через него тоже
 // (и потерять всё — в этом и смысл сравнения).
 func runMemoryCommand(a *agent.Agent, l Line, cmd string) Step {
-	st := Step{Command: cmd, Branch: a.ActiveBranch()}
+	st := Step{Command: cmd, Branch: a.ActiveBranch(), State: stateOf(a)}
 	switch {
 	case l.NewChat != "":
 		a.Reset()
+	case l.Stage != "":
+		to, note, _ := strings.Cut(l.Stage, " ")
+		if err := a.Stage(task.State(strings.TrimSpace(to)), strings.TrimSpace(note)); err != nil {
+			st.Command = cmd + " — " + err.Error()
+		}
 	case l.Remember != "":
 		lhs, value, _ := strings.Cut(l.Remember, "=")
 		scope, key, _ := strings.Cut(lhs, "/")

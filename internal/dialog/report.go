@@ -136,6 +136,52 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 	}
 
 	for _, r := range res {
+		if r.Task == nil {
+			continue
+		}
+		fmt.Fprintf(&b, "## Задача к концу прогона — %s\n\n", r.Variant.Name)
+		fmt.Fprintf(&b, "%s\n\n", r.Task.Resume())
+		if len(r.Task.Plan) > 0 {
+			b.WriteString("| # | шаг плана | сделан |\n|---:|---|---|\n")
+			for i, s := range r.Task.Plan {
+				mark := ""
+				if i+1 < r.Task.Step {
+					mark = "да"
+				} else if i+1 == r.Task.Step {
+					mark = "← сейчас"
+				}
+				fmt.Fprintf(&b, "| %d | %s | %s |\n", i+1, cell(s, 90), mark)
+			}
+			b.WriteString("\n")
+		}
+		// Журнал стадий — не отладка. Главное свойство дня 13 (пауза и
+		// продолжение) видно именно по нему: где остановились и почему.
+		if len(r.Task.Log) > 0 {
+			b.WriteString("Журнал стадий:\n\n")
+			for _, e := range r.Task.Log {
+				// Запись без стадий — это событие вроде «план утверждён»:
+				// оно про задачу, но не про переход, и «— текст» без стрелки
+				// в отчёте выглядел бы обрывком.
+				line := "- "
+				switch {
+				case e.From != "" && e.To != "":
+					line += string(e.From) + " → " + string(e.To)
+				case e.To != "":
+					line += string(e.To)
+				}
+				if e.Note != "" {
+					if strings.TrimSpace(line) != "-" {
+						line += " — "
+					}
+					line += e.Note
+				}
+				b.WriteString(line + "\n")
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	for _, r := range res {
 		if len(r.Layers) == 0 {
 			continue
 		}
@@ -212,6 +258,9 @@ func VariantLabel(r Result) string {
 	}
 	if c.Profile != "" {
 		label += " + профиль " + c.Profile
+	}
+	if c.TaskState != "" {
+		label += " + " + agent.TaskLabel(c.TaskState)
 	}
 	return label
 }

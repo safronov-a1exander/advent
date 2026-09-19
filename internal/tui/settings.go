@@ -41,6 +41,9 @@ type Settings struct {
 	KeepLast       *int
 	SummarizeEvery *int
 
+	// День 13 — режим состояния задачи.
+	TaskState string
+
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
 	Profiles []string
@@ -284,6 +287,14 @@ func (s *Settings) Fields() []Field {
 		prof.SetText = func(v string) error { s.Profile = strings.TrimSpace(v); return nil }
 		f = append(f, prof)
 
+		// День 13 — стадии задачи. Рядом с полем «задача»: они делят id.
+		st := EnumField("стадии", "", agent.TaskModes,
+			func() string { return s.TaskState },
+			func(v string) { s.TaskState = v })
+		st.Value = func() string { return agent.TaskLabel(s.TaskState) }
+		st.HintFn = func() string { return agent.TaskHint(s.TaskState) }
+		f = append(f, st)
+
 		// День 11 — слои памяти. Ключи слоёв рядом с режимом: сменить задачу
 		// значит сменить рабочую память, и это должно быть видно в одном месте.
 		mem := EnumField("память", "", agent.MemoryModes,
@@ -297,7 +308,7 @@ func (s *Settings) Fields() []Field {
 				func() string { return s.User },
 				func(v string) { s.User = v }),
 			TextField("задача",
-				"какой задачи рабочий слой. Сменить задачу — сменить рабочую память; долговременная останется",
+				"id задачи: её рабочая память (день 11) и её состояние (день 13). Сменить задачу — сменить и то, и другое",
 				func() string { return s.Task },
 				func(v string) { s.Task = v }),
 		)
@@ -373,6 +384,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		KeepLast:       s.KeepLast,
 		SummarizeEvery: s.SummarizeEvery,
 		Profile:        s.Profile,
+		TaskState:      s.TaskState,
 		Memory:         s.Memory,
 		User:           s.User,
 		Task:           s.Task,
@@ -399,6 +411,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.KeepLast = c.KeepLast
 	s.SummarizeEvery = c.SummarizeEvery
 	s.Profile = c.Profile
+	s.TaskState = c.TaskState
 	s.Memory = c.Memory
 	s.User = c.User
 	s.Task = c.Task

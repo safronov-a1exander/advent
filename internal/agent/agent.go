@@ -30,6 +30,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
+	"github.com/safronov-a1exander/advent/internal/task"
 )
 
 // ErrBusy — агент уже отвечает. Один агент ведёт один разговор: два
@@ -155,6 +156,11 @@ type Agent struct {
 	catalog []ModelTier
 	// newProf — как поднять профиль по id; ставит пул.
 	newProf func(string) (*profile.Profile, error)
+	// task — состояние текущей задачи: стадия, шаг, план (день 13).
+	task *task.Task
+	// newTask и saveTask — как поднять и сохранить задачу; ставит пул.
+	newTask  func(Config) (*task.Task, error)
+	saveTask func(*task.Task) error
 	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
 	// разговора меняют задачу или пользователя: слои должны переехать
 	// на другие файлы, а не продолжать писать в прежние.
@@ -216,6 +222,12 @@ func (a *Agent) SetConfig(c Config) {
 			a.prof = p
 		}
 	}
+	// Сменили задачу или включили стадии — поднимаем состояние той задачи.
+	if a.newTask != nil && (a.cfg.Task != c.Task || a.cfg.TaskState != c.TaskState) {
+		if t, err := a.newTask(c); err == nil {
+			a.task = t
+		}
+	}
 	if a.newMem != nil && (a.cfg.Memory != c.Memory || a.cfg.User != c.User || a.cfg.Task != c.Task) {
 		chat := a.mem.Layer(memory.ScopeChat).Entries()
 		a.mem = a.newMem(c)
@@ -266,6 +278,8 @@ func (a *Agent) Reset() {
 	// Рабочий и долговременный переживают сброс: задача не кончилась оттого,
 	// что стёрли переписку, и собеседник не стал другим человеком (день 11).
 	a.mem.ClearChat()
+	// Задача сброс переживает: стёртая переписка не означает, что работа
+	// не сделана. Закрыть задачу можно только явно (день 13).
 	a.resetBranches() // сброс — новый разговор: ветки и чекпойнты тоже уходят
 	a.gen++
 	a.touch()
@@ -306,6 +320,9 @@ func (a *Agent) Messages(text string) []llm.Message {
 	// Отладочный вид не ходит в API: показываем дорогу по умолчанию.
 	pl, picked := a.prof.Default()
 	system = withMemory(system, profileBlocks(a.prof, pl, picked))
+	if b := taskBlock(a.cfg, a.task); b != "" {
+		system = joinSystem(system, b)
+	}
 	system = withMemory(system, a.memoryBlocks(a.cfg, a.mem))
 	return compose(system, past, text)
 }
@@ -362,6 +379,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	mem := a.mem
 	prof := a.prof
 	catalog := a.catalog
+	tsk := a.task
 	gen := a.gen
 	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
 	a.mu.Unlock()
@@ -386,6 +404,10 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	system, past := window(cfg, hist, sum, facts)
 	system = withMemory(system, profileBlocks(prof, pl, picked))
+	// День 13: где мы в задаче — рамка для ответа, поэтому перед памятью.
+	if b := taskBlock(cfg, tsk); b != "" {
+		system = joinSystem(system, b)
+	}
 	system = withMemory(system, a.memoryBlocks(cfg, mem))
 
 	a.mu.Lock()
@@ -451,6 +473,12 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		}
 		reply.Final = resp
 	}
+
+	// День 13: продвижение задачи — после ответа, но ДО записи хода в учёт.
+	// После ответа, потому что пока ответа нет, непонятно, закончилась ли
+	// стадия. До записи хода — потому что служебный вызов продвижения стоит
+	// токенов, и они должны попасть в этот ход, а не потеряться.
+	a.advanceTask(ctx, cfg, tsk, text, reply.Final.Content, gen, &turn, on)
 
 	a.mu.Lock()
 	if a.gen == gen {

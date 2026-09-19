@@ -601,6 +601,19 @@ func (m *Model) dumpAgent() {
 			m.pushLine(stDim.Render("           (под каждый запрос дорогу выбирает короткий вызов модели; здесь — по умолчанию)"))
 		}
 	}
+	// День 13: где мы в задаче и что уже сделано.
+	if tk := m.ag.Task(); tk != nil {
+		m.pushLine(stDim.Render(fmt.Sprintf("  задача   %s · режим «%s»", tk.Resume(), agent.TaskLabel(cfg.TaskState))))
+		for i, s := range tk.Plan {
+			mark := " "
+			if i+1 < tk.Step {
+				mark = "✓"
+			} else if i+1 == tk.Step {
+				mark = "→"
+			}
+			m.pushLine(stDim.Render(fmt.Sprintf("    %s %d. %s", mark, i+1, s)))
+		}
+	}
 	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос
 	// задания «какие данные попадают в каждый слой».
 	if mem := m.ag.Memory(); mem != nil {
@@ -832,6 +845,9 @@ func (m *Model) View() tea.View {
 	}
 	if prof := m.ag.Profile(); prof != nil {
 		header += "  " + stNote.Render("👤 "+prof.Summary())
+	}
+	if tk := m.ag.Task(); tk != nil {
+		header += "  " + stNote.Render("◆ "+tk.Summary())
 	}
 	if mh := memoryHeader(m.ag); mh != "" {
 		header += "  " + stNote.Render(mh)
