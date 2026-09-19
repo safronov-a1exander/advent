@@ -588,11 +588,7 @@ func (m *Model) dumpAgent() {
 			if len(entries) == 0 {
 				continue
 			}
-			goes := "уходит в промпт"
-			if !sentScope(cfg, sc) {
-				goes = "в промпт НЕ уходит"
-			}
-			m.pushLine(stDim.Render(fmt.Sprintf("    %s (%s) — %s:", sc, sc.Label(), goes)))
+			m.pushLine(stDim.Render(fmt.Sprintf("    %s (%s):", sc, sc.Label())))
 			for _, e := range entries {
 				m.pushLine(stDim.Render("      " + shorten(e.Key+": "+e.Value, 100) + "  " + string(e.Source)))
 			}

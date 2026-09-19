@@ -232,28 +232,6 @@ func TestMemorySurvivesNewConversation(t *testing.T) {
 	}
 }
 
-func TestMemoryScopesLimitWhatGoesIntoPrompt(t *testing.T) {
-	f := &fakeLLM{}
-	a := NewPool(f, "fake", nil).Spawn(Config{
-		Model: "m", System: "sys", Memory: MemoryManual, User: "саша", Task: "барбершоп",
-		MemoryScopes: []string{"task"}})
-	_ = a.Remember(memory.ScopeUser, "стек", "Go")
-	_ = a.Remember(memory.ScopeTask, "срок", "6 недель")
-	ask(t, a, "привет")
-
-	sys := systemOf(f.last())
-	if !strings.Contains(sys, "срок: 6 недель") {
-		t.Fatalf("разрешённый слой не попал в промпт:\n%s", sys)
-	}
-	if strings.Contains(sys, "стек: Go") {
-		t.Fatalf("запрещённый слой всё равно ушёл в промпт:\n%s", sys)
-	}
-	// В самой памяти запись при этом осталась — фильтр про промпт, не про память.
-	if a.Memory().Layer(memory.ScopeUser).Len() != 1 {
-		t.Fatal("фильтр слоёв не должен трогать саму память")
-	}
-}
-
 func TestChangingTaskSwapsWorkingMemory(t *testing.T) {
 	f := &fakeLLM{}
 	p := NewPool(f, "fake", nil)

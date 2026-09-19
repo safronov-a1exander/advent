@@ -41,12 +41,10 @@ type Settings struct {
 	KeepLast       *int
 	SummarizeEvery *int
 
-	// День 11 — модель памяти: режим раскладки, ключи хранимых слоёв
-	// и какие слои уходят в промпт.
-	Memory       string
-	User         string
-	Task         string
-	MemoryScopes []string
+	// День 11 — модель памяти: режим раскладки и ключи хранимых слоёв.
+	Memory string
+	User   string
+	Task   string
 
 	// День 3 — способ рассуждения. Только для чата: в сценариях цепочки
 	// описаны явно через steps.
@@ -286,10 +284,7 @@ func (s *Settings) Fields() []Field {
 				"какой задачи рабочий слой. Сменить задачу — сменить рабочую память; долговременная останется",
 				func() string { return s.Task },
 				func(v string) { s.Task = v }),
-			TextField("слои в промпт",
-				"какие слои отправлять через запятую: chat, task, user. Пусто — все; лишний слой в промпте стоит токенов и путает модель",
-				func() string { return strings.Join(s.MemoryScopes, ", ") },
-				func(v string) { s.MemoryScopes = splitList(v) }))
+		)
 	}
 
 	if s.Overlay {
@@ -346,7 +341,6 @@ func (s *Settings) AgentConfig() agent.Config {
 		Memory:         s.Memory,
 		User:           s.User,
 		Task:           s.Task,
-		MemoryScopes:   s.MemoryScopes,
 	}.Clone()
 }
 
@@ -372,7 +366,6 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.Memory = c.Memory
 	s.User = c.User
 	s.Task = c.Task
-	s.MemoryScopes = c.MemoryScopes
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

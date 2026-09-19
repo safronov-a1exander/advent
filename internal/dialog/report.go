@@ -64,14 +64,19 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 
 	b.WriteString("\n## Проверки на память\n\n")
 	for i, l := range s.Dialog {
-		if len(l.Expect) == 0 {
+		if !l.Checked() {
 			continue
 		}
 		fmt.Fprintf(&b, "### %d. %s\n\n", i+1, l.Say)
 		if l.Note != "" {
 			b.WriteString("_" + l.Note + "_\n\n")
 		}
-		fmt.Fprintf(&b, "Ожидали в ответе: %s\n\n", "`"+strings.Join(l.Expect, "`, `")+"`")
+		if len(l.Expect) > 0 {
+			fmt.Fprintf(&b, "Ожидали в ответе: %s\n\n", "`"+strings.Join(l.Expect, "`, `")+"`")
+		}
+		if len(l.Forbid) > 0 {
+			fmt.Fprintf(&b, "В ответе НЕ должно быть: %s\n\n", "`"+strings.Join(l.Forbid, "`, `")+"`")
+		}
 		for _, r := range res {
 			if i >= len(r.Steps) {
 				continue
@@ -154,7 +159,7 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 func countChecks(s *Scenario) int {
 	n := 0
 	for _, l := range s.Dialog {
-		if len(l.Expect) > 0 {
+		if l.Checked() {
 			n++
 		}
 	}

@@ -58,10 +58,6 @@ type Config struct {
 	Memory string `yaml:"memory" json:"memory,omitempty"`
 	User   string `yaml:"user" json:"user,omitempty"`
 	Task   string `yaml:"task" json:"task,omitempty"`
-	// MemoryScopes — какие слои отправлять в промпт; пусто — все.
-	// Против антипаттерна «всё в один промпт»: слой, который в этой задаче
-	// ничего не решает, отправлять незачем.
-	MemoryScopes []string `yaml:"memory_scopes" json:"memory_scopes,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -91,9 +87,6 @@ func (c Config) Clone() Config {
 	}
 	if c.SummarizeEvery != nil {
 		out.SummarizeEvery = llm.I(*c.SummarizeEvery)
-	}
-	if c.MemoryScopes != nil {
-		out.MemoryScopes = append([]string(nil), c.MemoryScopes...)
 	}
 	return out
 }
@@ -180,9 +173,6 @@ func (c Config) Summary() string {
 		if c.Task != "" {
 			mem += " · задача " + c.Task
 		}
-		if len(c.MemoryScopes) > 0 {
-			mem += " · слои " + strings.Join(c.MemoryScopes, "+")
-		}
 		parts = append(parts, mem)
 	}
 	if !c.Stream {
@@ -257,9 +247,6 @@ func overlay(base, top Config) Config {
 	}
 	if top.Task != "" {
 		out.Task = top.Task
-	}
-	if top.MemoryScopes != nil {
-		out.MemoryScopes = append([]string(nil), top.MemoryScopes...)
 	}
 	return out
 }

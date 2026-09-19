@@ -135,19 +135,3 @@ func TestResetKeepsTaskAndUserLayers(t *testing.T) {
 		t.Fatal("в шапке пропала сводка памяти")
 	}
 }
-
-func TestDumpShowsWhichLayersGoIntoPrompt(t *testing.T) {
-	m := memModel(t)
-	m.set.MemoryScopes = []string{"task"}
-	typeText(t, m, "/user стек = Go")
-	typeText(t, m, "/task срок = 6 недель")
-
-	press(t, m, "ctrl+d")
-	dump := strings.Join(m.lines, "\n")
-	if !strings.Contains(dump, "уходит в промпт") {
-		t.Fatalf("Ctrl+D не сказал, что уходит в промпт:\n%s", dump)
-	}
-	if !strings.Contains(dump, "в промпт НЕ уходит") {
-		t.Fatalf("Ctrl+D не отметил слой, который отключён:\n%s", dump)
-	}
-}

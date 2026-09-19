@@ -71,6 +71,12 @@ type Line struct {
 	// Expect — подстроки, которые обязаны быть в ответе (без учёта регистра).
 	// Реплики с проверками — это вопросы на память о раннем разговоре.
 	Expect []string `yaml:"expect"`
+	// Forbid — подстроки, которых в ответе быть не должно.
+	//
+	// Нужен ровно там, где проверяется краткосрочный слой: он обязан
+	// умереть вместе с разговором, и увидеть это можно только проверкой
+	// наоборот — «этого агент помнить уже не должен».
+	Forbid []string `yaml:"forbid"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -111,6 +117,9 @@ func Load(path string) (*Scenario, error) {
 	}
 	return &s, nil
 }
+
+// Checked — есть ли у строки проверки.
+func (l Line) Checked() bool { return len(l.Expect) > 0 || len(l.Forbid) > 0 }
 
 // Command — команда веток строки или пусто, если это реплика.
 func (l Line) Command() string {
@@ -255,7 +264,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		}
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
-		st := Step{Say: l.Say, Checked: len(l.Expect) > 0, Branch: a.ActiveBranch()}
+		st := Step{Say: l.Say, Checked: l.Checked(), Branch: a.ActiveBranch()}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -267,7 +276,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			st.Turn = turns[len(turns)-1]
 		}
 		if st.Checked {
-			st.Passed, st.Missing = check(st.Answer, l.Expect)
+			st.Passed, st.Missing = check(st.Answer, l)
 		}
 		res.Steps = append(res.Steps, st)
 	}
@@ -338,7 +347,7 @@ func (l Line) Text() string {
 
 // check — все ли ожидаемые подстроки есть в ответе. Регистр и неразрывные
 // пробелы в числах не важны: «21 135» и «21135» — один и тот же ответ.
-func check(answer string, expect []string) (bool, []string) {
+func check(answer string, l Line) (bool, []string) {
 	norm := func(s string) string {
 		s = strings.ToLower(s)
 		for _, sp := range []string{" ", " ", " "} {
@@ -348,9 +357,16 @@ func check(answer string, expect []string) (bool, []string) {
 	}
 	a := norm(answer)
 	var missing []string
-	for _, e := range expect {
+	for _, e := range l.Expect {
 		if !strings.Contains(a, norm(e)) {
 			missing = append(missing, e)
+		}
+	}
+	// Запрет проверяется так же буквально, как ожидание: годится
+	// для «этого в ответе быть не должно», а не для тонких различий.
+	for _, f := range l.Forbid {
+		if strings.Contains(a, norm(f)) {
+			missing = append(missing, "лишнее: "+f)
 		}
 	}
 	return len(missing) == 0, missing

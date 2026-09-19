@@ -114,32 +114,12 @@ func (a *Agent) Forget(scope memory.Scope, key string) error {
 	return nil
 }
 
-// memoryBlocks — блоки слоёв для системного промпта с учётом того, какие
-// слои конфиг разрешил отправлять.
+// memoryBlocks — блоки хранимых слоёв для системного промпта.
 func (a *Agent) memoryBlocks(cfg Config, m *memory.Memory) []string {
 	if m == nil || cfg.Memory == MemoryOff {
 		return nil
 	}
-	return m.Blocks(cfg.memoryScopes()...)
-}
-
-// memoryScopes — какие слои идут в промпт. Пусто в конфиге — все.
-//
-// Отдельная настройка нужна из-за антипаттерна «всё в один промпт»:
-// в задаче, где долговременный слой ничего не решает, его не надо
-// отправлять просто потому, что он есть.
-func (c Config) memoryScopes() []memory.Scope {
-	if len(c.MemoryScopes) == 0 {
-		return nil
-	}
-	out := make([]memory.Scope, 0, len(c.MemoryScopes))
-	for _, s := range c.MemoryScopes {
-		sc := memory.Scope(strings.ToLower(strings.TrimSpace(s)))
-		if sc.Valid() {
-			out = append(out, sc)
-		}
-	}
-	return out
+	return m.Blocks()
 }
 
 // route — служебный вызов раскладки: что из новой реплики в какой слой.

@@ -49,11 +49,10 @@ type askFlags struct {
 	summarizeEvery  int
 
 	// Модель памяти (день 11): режим раскладки и ключи хранимых слоёв.
-	memoryMode   string
-	memoryUser   string
-	memoryTask   string
-	memoryScopes string
-	memoryDir    string
+	memoryMode string
+	memoryUser string
+	memoryTask string
+	memoryDir  string
 
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
@@ -76,7 +75,6 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.memoryMode, "memory", "", "слои памяти для chat/demo: пусто — выключены, manual — кладёт пользователь, auto — плюс раскладка агентом")
 	fs.StringVar(&a.memoryUser, "user", "", "чей долговременный слой памяти")
 	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
-	fs.StringVar(&a.memoryScopes, "memory-scopes", "", "какие слои отправлять в промпт через запятую: chat,task,user (пусто — все)")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
 }
@@ -255,16 +253,6 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	set.Memory = a.memoryMode
 	set.User = a.memoryUser
 	set.Task = a.memoryTask
-	for _, v := range strings.Split(a.memoryScopes, ",") {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		if !memory.Scope(v).Valid() {
-			return fmt.Errorf("-memory-scopes: неизвестный слой %q, ожидали chat, task или user", v)
-		}
-		set.MemoryScopes = append(set.MemoryScopes, v)
-	}
 
 	// Экран не ходит в API сам: он говорит с агентами из пула, а пул
 	// пишет каждый вызов в тот же журнал runs/*.jsonl.

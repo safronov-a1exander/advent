@@ -172,11 +172,11 @@ func TestLoadVariantWithBranches(t *testing.T) {
 }
 
 func TestCheckIgnoresCaseAndSpacesInNumbers(t *testing.T) {
-	ok, missing := check("Осталось 21 135 ₽, Саша", []string{"21135", "саша"})
+	ok, missing := check("Осталось 21 135 ₽, Саша", Line{Expect: []string{"21135", "саша"}})
 	if !ok || len(missing) != 0 {
 		t.Fatalf("проверка не прошла: %v", missing)
 	}
-	ok, missing = check("не помню", []string{"10000"})
+	ok, missing = check("не помню", Line{Expect: []string{"10000"}})
 	if ok || len(missing) != 1 {
 		t.Fatal("ложное срабатывание проверки")
 	}
@@ -244,5 +244,24 @@ func TestLoadRejectsBadRemember(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "remember") {
 		t.Fatalf("сценарий с кривым remember должен отвергаться: %v", err)
+	}
+}
+
+func TestForbidCatchesWhatShouldHaveBeenForgotten(t *testing.T) {
+	// Проверка наоборот. Нужна краткосрочному слою: он обязан умереть
+	// вместе с разговором, и увидеть это можно только так.
+	l := Line{Say: "о чём мы вчера договорились?", Forbid: []string{"самозапис"}}
+	if !l.Checked() {
+		t.Fatal("строка с forbid — проверяемая")
+	}
+	if ok, _ := check("Мы это не обсуждали в этом разговоре.", l); !ok {
+		t.Fatal("правильный ответ забракован")
+	}
+	ok, missing := check("Договорились на самозапись клиента.", l)
+	if ok {
+		t.Fatal("пережившая обрыв заметка должна ловиться")
+	}
+	if len(missing) != 1 || !strings.HasPrefix(missing[0], "лишнее:") {
+		t.Fatalf("непонятно, что не так: %v", missing)
 	}
 }

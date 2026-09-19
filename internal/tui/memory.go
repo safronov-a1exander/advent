@@ -227,18 +227,3 @@ func memoryHeader(a *agent.Agent) string {
 	}
 	return "🧠 " + mem.Summary()
 }
-
-// sentScope — уходит ли слой в промпт при этом конфиге. Разрешённый набор
-// слоёв живёт в конфиге агента, а показать его нужно рядом с содержимым:
-// «запись есть, но модель её не видит» — самая частая причина недоумения.
-func sentScope(cfg agent.Config, s memory.Scope) bool {
-	if len(cfg.MemoryScopes) == 0 {
-		return true
-	}
-	for _, v := range cfg.MemoryScopes {
-		if memory.Scope(strings.ToLower(strings.TrimSpace(v))) == s {
-			return true
-		}
-	}
-	return false
-}
