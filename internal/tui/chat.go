@@ -626,8 +626,7 @@ func (m *Model) dumpAgent() {
 			if !inv.Active(stage) {
 				mark = "· " // правило чужой стадии — не действует сейчас
 			}
-			m.pushLine(stDim.Render(fmt.Sprintf("    %s%s", mark, shorten(inv.Rule, 100))))
-			m.pushLine(stDim.Render("        " + inv.Filters()))
+			m.pushLine(stDim.Render(fmt.Sprintf("    %s%s", mark, shorten(oneLine(inv.Rule), 110))))
 		}
 	}
 	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос

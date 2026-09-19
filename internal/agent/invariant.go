@@ -19,39 +19,33 @@ import (
 // не доходит; вместо него агент переспрашивает модель с объяснением, что
 // именно нарушено, и отдаёт уже исправленный.
 //
-// Порядок проверки задан ценой:
+// Защита в два слоя, и оба обязательны:
 //
-//  1. быстрые фильтры (подстроки) — всегда, они бесплатны и ловят
-//     очевидное сразу;
-//  2. смысловая проверка отдельной моделью — если фильтры ничего не нашли.
-//     Она смотрит ВСЕ правила, включая те, у которых фильтр есть: пустой
-//     фильтр не значит «нарушения нет», он значит «очевидного не видно».
-//     Тратить вызов на ответ, уже забракованный фильтром, незачем.
+//  1. правила уходят в системный промпт. Это инструкция, её можно нарушить —
+//     но нарушают редко, и это бесплатно;
+//  2. ответ проверяется отдельным вызовом. Это и есть та самая «внешняя
+//     LLM как механизм сдержек и противовесов», о которой говорил курс.
 //
 // Повторов по умолчанию один. Курс предупреждал, что проверять всё моделью
-// «может быть адски дорого и нивелировать весь эффект от ИИ»; бесконечный
-// цикл на упрямом правиле — ровно этот случай. Если и повтор нарушает,
-// ответ всё равно уходит пользователю, но с явной пометкой: молча отдать
-// нарушающий ответ хуже, чем отдать его с предупреждением.
+// «может быть адски дорого»; бесконечный цикл на упрямом правиле — ровно
+// этот случай. Если и повтор нарушает, ответ всё равно уходит пользователю,
+// но с явной пометкой: молча отдать нарушающий ответ хуже, чем отдать его
+// с предупреждением.
 
 // Режимы инвариантов — поле Config.Invariants.
 const (
 	// InvariantOff — правил нет.
 	InvariantOff = ""
-	// InvariantPrompt — правила уходят в промпт, но ответ не проверяется.
-	// Это то, что большинство и делает: дёшево и работает в 99% случаев.
+	// InvariantPrompt — правила уходят в промпт, ответ не проверяется.
+	// Бесплатно и работает в подавляющем большинстве случаев.
 	InvariantPrompt = "prompt"
-	// InvariantCheck — правила в промпте плюс быстрые фильтры и повтор
-	// при нарушении. Бесплатно, но ловит только очевидное.
+	// InvariantCheck — плюс проверка ответа отдельным вызовом и повтор
+	// при нарушении. Один вызов на ход.
 	InvariantCheck = "check"
-	// InvariantJudge — то же плюс смысловая проверка каждого правила
-	// отдельной моделью. Единственный режим, который проверяет правила
-	// без фильтров, — и единственный, который стоит вызова на каждый ход.
-	InvariantJudge = "judge"
 )
 
 // InvariantModes — порядок перебора в панели.
-var InvariantModes = []string{InvariantOff, InvariantPrompt, InvariantCheck, InvariantJudge}
+var InvariantModes = []string{InvariantOff, InvariantPrompt, InvariantCheck}
 
 // InvariantLabel — имя режима для показа.
 func InvariantLabel(mode string) string {
@@ -59,9 +53,7 @@ func InvariantLabel(mode string) string {
 	case InvariantPrompt:
 		return "только в промпте"
 	case InvariantCheck:
-		return "промпт + быстрые фильтры"
-	case InvariantJudge:
-		return "промпт + фильтры + смысловая проверка"
+		return "промпт + проверка ответа"
 	}
 	return "без инвариантов"
 }
@@ -70,11 +62,9 @@ func InvariantLabel(mode string) string {
 func InvariantHint(mode string) string {
 	switch mode {
 	case InvariantPrompt:
-		return "правила уходят в системный промпт как запрет; ответ не проверяется — дёшево, но нарушение пройдёт незамеченным"
+		return "правила уходят в системный промпт как запрет; ответ не проверяется — бесплатно, но нарушение пройдёт незамеченным"
 	case InvariantCheck:
-		return "плюс быстрые фильтры по подстрокам: ловят очевидное бесплатно, но правила без фильтра не проверяются вовсе"
-	case InvariantJudge:
-		return "плюс смысловая проверка каждого правила отдельной моделью — вызов на каждый ход, зато проверяется то, что подстрокой не выразишь"
+		return "плюс отдельный вызов, который смотрит ответ и говорит, что нарушено; нарушивший ответ не доходит до пользователя — агент переспрашивает модель"
 	}
 	return "ограничений нет, модель отвечает как умеет"
 }
@@ -111,19 +101,17 @@ func invariantBlock(cfg Config, set *invariant.Set, stage string) string {
 func (a *Agent) guard(ctx context.Context, cfg Config, set *invariant.Set, stage string,
 	base []llm.Message, text, answer string, turn *Turn, on func(Event),
 ) (string, []invariant.Violation) {
-	if set == nil || cfg.Invariants == InvariantOff || cfg.Invariants == InvariantPrompt {
+	if set == nil || cfg.Invariants != InvariantCheck {
 		return answer, nil
 	}
 	list := set.List()
+	if !invariant.Applies(list, stage) {
+		return answer, nil
+	}
 	tries := set.RetriesN()
 
 	for attempt := 0; ; attempt++ {
-		vs := invariant.Filter(answer, list, stage)
-		// Смысловая проверка — только если фильтры ничего не нашли: тратить
-		// вызов на уже забракованный ответ незачем.
-		if len(vs) == 0 && cfg.Invariants == InvariantJudge && invariant.NeedsJudge(list, stage) {
-			vs = a.judge(ctx, cfg, list, stage, answer, turn, on)
-		}
+		vs := a.checkAnswer(ctx, cfg, list, stage, answer, turn, on)
 		if len(vs) == 0 {
 			if attempt > 0 {
 				on(Event{Kind: EventInvariant, Label: "инварианты: ответ исправлен и прошёл проверку"})
@@ -164,17 +152,20 @@ func (a *Agent) guard(ctx context.Context, cfg Config, set *invariant.Set, stage
 	}
 }
 
-// judge — смысловая проверка правил отдельной моделью.
-// Сбой не считается нарушением: иначе упавший запрос заставлял бы
-// переписывать нормальные ответы.
-func (a *Agent) judge(ctx context.Context, cfg Config, list []invariant.Invariant, stage, answer string,
+// checkAnswer — один вызов проверки: все правила и ответ, обратно список
+// нарушенных.
+//
+// Сбой не считается нарушением: иначе упавший запрос или не-JSON в ответе
+// заставляли бы переписывать нормальные ответы, и один сбой сети превращался
+// бы в два лишних вызова и испорченный ответ.
+func (a *Agent) checkAnswer(ctx context.Context, cfg Config, list []invariant.Invariant, stage, answer string,
 	turn *Turn, on func(Event),
 ) []invariant.Violation {
 	req := llm.Request{
 		Model: cfg.Model,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: invariant.JudgeSystem},
-			{Role: llm.RoleUser, Content: invariant.JudgePrompt(list, stage, answer)},
+			{Role: llm.RoleSystem, Content: invariant.CheckSystem},
+			{Role: llm.RoleUser, Content: invariant.CheckPrompt(list, stage, answer)},
 		},
 		Temperature:    llm.F(0),
 		Thinking:       &llm.Thinking{Type: "disabled"},
@@ -184,16 +175,16 @@ func (a *Agent) judge(ctx context.Context, cfg Config, list []invariant.Invarian
 	a.record(req, resp, err, "проверка инвариантов", true)
 	a.accountAux(resp, err)
 	if err != nil {
-		on(Event{Kind: EventInvariant, Label: "смысловая проверка не удалась — считаем, что нарушений нет", Content: err.Error()})
+		on(Event{Kind: EventInvariant, Label: "проверка не удалась — считаем, что нарушений нет", Content: err.Error()})
 		return nil
 	}
 	turn.AuxCalls++
 	turn.AuxPrompt += resp.Usage.PromptTokens
 	turn.AuxCompletion += resp.Usage.CompletionTokens
 
-	vs, err := invariant.ParseJudge(resp.Content, list, stage)
+	vs, err := invariant.ParseCheck(resp.Content, list, stage)
 	if err != nil {
-		on(Event{Kind: EventInvariant, Label: "смысловая проверка ответила не JSON — считаем, что нарушений нет", Content: err.Error()})
+		on(Event{Kind: EventInvariant, Label: "проверка ответила не JSON — считаем, что нарушений нет", Content: err.Error()})
 		return nil
 	}
 	return vs
@@ -202,11 +193,7 @@ func (a *Agent) judge(ctx context.Context, cfg Config, list []invariant.Invarian
 func violationsText(vs []invariant.Violation) string {
 	out := make([]string, 0, len(vs))
 	for _, v := range vs {
-		s := v.String()
-		if v.ByJudge {
-			s += " [смысловая проверка]"
-		}
-		out = append(out, s)
+		out = append(out, v.String())
 	}
 	return strings.Join(out, "\n")
 }

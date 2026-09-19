@@ -11,8 +11,8 @@ import (
 	"github.com/safronov-a1exander/advent/internal/llm"
 )
 
-// invDir — набор из двух правил: у одного есть быстрый фильтр,
-// у другого только текст, и его смотрит смысловая проверка.
+// invDir — набор из двух правил. Оба — просто текст: проверяет их модель,
+// и никакого разбора подстрок в коде нет.
 func invDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -21,22 +21,9 @@ func invDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"_набор.md": `---
-name: проект
-retries: 1
----
-
-Рамки проекта.
-`,
-		"стек.md": `---
-forbid: [python, django]
-unless: [нельзя, "не подходит"]
----
-
-Бэкенд только на Go, Python предлагать нельзя.
-`,
-		// Правило без frontmatter: фильтра нет, смотрит смысловая проверка.
-		"сроки.md": "Срок называется только с оговоркой, от чего он зависит.\n",
+		"_набор.md": "---\nname: проект\nretries: 1\n---\n\nРамки проекта.\n",
+		"стек.md":   "Бэкенд только на Go, Python предлагать нельзя.\n",
+		"сроки.md":  "Срок называется только с оговоркой, от чего он зависит.\n",
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
@@ -53,8 +40,24 @@ func invPool(t *testing.T, p llm.Provider) *Pool {
 	return pool
 }
 
-// breaker отвечает запрещённым словом, пока его не поправят: первый ответ
-// нарушает правило, после объяснения — нет. Так ведёт себя и живая модель.
+// isCheck — это запрос к проверяющему, а не к ассистенту.
+func isCheck(req llm.Request) bool {
+	return strings.HasPrefix(req.Messages[0].Content, "Ты проверяешь ответ ассистента")
+}
+
+// isRetry — это переспрос после нарушения.
+func isRetry(req llm.Request) bool {
+	return strings.Contains(req.Messages[len(req.Messages)-1].Content, "нарушил ограничения")
+}
+
+func reply(req llm.Request, content string) (*llm.Response, error) {
+	return &llm.Response{Model: req.Model, Content: content, FinishReason: "stop",
+		Usage: llm.Usage{PromptTokens: 40, CompletionTokens: 10}}, nil
+}
+
+// breaker — модель, которая нарушает правило, пока ей не объяснят.
+// Проверяющий (тот же клиент) честно называет нарушение, пока оно есть.
+// Так ведёт себя и живая пара «ассистент + проверка».
 type breaker struct {
 	*fakeLLM
 	fixed bool
@@ -63,16 +66,25 @@ type breaker struct {
 func (b *breaker) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	b.fakeLLM.mu.Lock()
 	b.fakeLLM.requests = append(b.fakeLLM.requests, req)
+	fixed := b.fixed
 	b.fakeLLM.mu.Unlock()
 
-	last := req.Messages[len(req.Messages)-1].Content
-	content := "Возьмём Python и Django — так быстрее."
-	if strings.Contains(last, "нарушил ограничения") {
+	switch {
+	case isCheck(req):
+		body := req.Messages[1].Content
+		if strings.Contains(body, "Возьмём Python") {
+			return reply(req, `{"violations":[{"name":"стек","why":"предложен Python"}]}`)
+		}
+		return reply(req, `{"violations":[]}`)
+	case isRetry(req):
+		b.fakeLLM.mu.Lock()
 		b.fixed = true
-		content = "Бэкенд на Go, как договорились."
+		b.fakeLLM.mu.Unlock()
+		return reply(req, "Бэкенд на Go, как договорились.")
+	case fixed:
+		return reply(req, "Бэкенд на Go, как договорились.")
 	}
-	return &llm.Response{Model: req.Model, Content: content, FinishReason: "stop",
-		Usage: llm.Usage{PromptTokens: 40, CompletionTokens: 10}}, nil
+	return reply(req, "Возьмём Python и Django — так быстрее.")
 }
 
 func (b *breaker) ChatStream(ctx context.Context, req llm.Request, on func(llm.Chunk) error) (*llm.Response, error) {
@@ -94,8 +106,8 @@ func TestInvariantsGoIntoPrompt(t *testing.T) {
 	}
 }
 
-func TestPromptModeDoesNotCheckAnswer(t *testing.T) {
-	// Режим «только промпт» — то, что большинство и делает: дёшево,
+func TestPromptModeCostsNothingAndChecksNothing(t *testing.T) {
+	// Режим «только промпт» — то, что большинство и делает: бесплатно,
 	// но нарушение проходит незамеченным. Это надо показать честно.
 	b := &breaker{fakeLLM: &fakeLLM{}}
 	a := invPool(t, b).Spawn(Config{Model: "m", Invariants: InvariantPrompt, InvariantSet: "проект"})
@@ -104,8 +116,15 @@ func TestPromptModeDoesNotCheckAnswer(t *testing.T) {
 	if !strings.Contains(got, "Python") {
 		t.Fatal("в режиме промпта ответ не должен переписываться")
 	}
-	if b.fixed {
-		t.Fatal("повтора быть не должно")
+	if tr := a.Turns(); tr[0].AuxCalls != 0 {
+		t.Fatalf("в режиме промпта служебных вызовов быть не должно: %+v", tr[0])
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if isCheck(req) {
+			t.Fatal("в режиме промпта проверка запускаться не должна")
+		}
 	}
 }
 
@@ -141,21 +160,23 @@ func TestCheckModeRewritesViolatingAnswer(t *testing.T) {
 	if len(h) != 2 || strings.Contains(h[1].Content, "Python") {
 		t.Fatalf("в историю попал нарушающий ответ: %+v", h)
 	}
-	// Повтор — служебный вызов, и он считается.
-	if tr := a.Turns(); tr[0].AuxCalls != 1 || tr[0].Violations != 0 {
-		t.Fatalf("учёт повтора: %+v", tr[0])
+	// Два вызова проверки (до и после повтора) и сам повтор.
+	if tr := a.Turns(); tr[0].AuxCalls != 3 || tr[0].Violations != 0 {
+		t.Fatalf("учёт служебных вызовов: %+v", tr[0])
 	}
 }
 
-// stubborn нарушает всегда — даже после объяснения.
+// stubborn нарушает всегда, и проверяющий всегда это видит.
 type stubborn struct{ *fakeLLM }
 
 func (s stubborn) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	s.fakeLLM.mu.Lock()
 	s.fakeLLM.requests = append(s.fakeLLM.requests, req)
 	s.fakeLLM.mu.Unlock()
-	return &llm.Response{Model: req.Model, Content: "всё равно Python", FinishReason: "stop",
-		Usage: llm.Usage{PromptTokens: 40, CompletionTokens: 5}}, nil
+	if isCheck(req) {
+		return reply(req, `{"violations":[{"name":"стек","why":"всё ещё Python"}]}`)
+	}
+	return reply(req, "всё равно Python")
 }
 
 func (s stubborn) ChatStream(ctx context.Context, req llm.Request, on func(llm.Chunk) error) (*llm.Response, error) {
@@ -188,71 +209,121 @@ func TestStubbornViolationIsReportedNotHidden(t *testing.T) {
 	}
 }
 
-// judgeProvider отвечает на обычный запрос нормально, а на проверку —
-// нарушением правила «сроки».
-type judgeProvider struct{ *fakeLLM }
+// refuser правильно отказывается, называя запрещённое. Проверяющий
+// обязан понять, что это соблюдение правила, а не нарушение.
+type refuser struct{ *fakeLLM }
 
-func (p judgeProvider) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
+func (p refuser) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	p.fakeLLM.mu.Lock()
 	p.fakeLLM.requests = append(p.fakeLLM.requests, req)
 	p.fakeLLM.mu.Unlock()
-
-	switch {
-	case strings.HasPrefix(req.Messages[0].Content, "Ты проверяешь ответ ассистента"):
-		// Придуманное правило в ответе тоже есть — проверяем, что отбрасываем.
-		return &llm.Response{Model: req.Model,
-			Content: `{"violations":[{"name":"сроки","why":"две недели без условий"},{"name":"выдумка","why":"мимо"}]}`,
-			Usage:   llm.Usage{PromptTokens: 50, CompletionTokens: 15}}, nil
-	case strings.Contains(req.Messages[len(req.Messages)-1].Content, "нарушил ограничения"):
-		return &llm.Response{Model: req.Model, Content: "Две недели, если Calendar отдаёт слоты.",
-			Usage: llm.Usage{PromptTokens: 40, CompletionTokens: 10}}, nil
+	if isCheck(req) {
+		return reply(req, `{"violations":[]}`)
 	}
-	return &llm.Response{Model: req.Model, Content: "Сделаем за две недели.",
-		Usage: llm.Usage{PromptTokens: 40, CompletionTokens: 10}}, nil
+	return reply(req, "Python не подходит: бэкенд только на Go. Возьмём стандартную библиотеку.")
 }
 
-func (p judgeProvider) ChatStream(ctx context.Context, req llm.Request, on func(llm.Chunk) error) (*llm.Response, error) {
+func (p refuser) ChatStream(ctx context.Context, req llm.Request, on func(llm.Chunk) error) (*llm.Response, error) {
 	return p.Chat(ctx, req)
 }
 
-func TestJudgeCatchesWhatCodeCannot(t *testing.T) {
+func TestRefusalIsNotAViolation(t *testing.T) {
+	// Случай, на котором ломается проверка подстрокой: отказ называет то,
+	// от чего отказывается. Модель это различает, список слов — нет.
+	// Ради этого проверка и делается моделью.
 	f := &fakeLLM{}
-	a := invPool(t, judgeProvider{f}).Spawn(Config{Model: "m", Invariants: InvariantJudge, InvariantSet: "проект"})
+	a := invPool(t, refuser{f}).Spawn(Config{Model: "m", Invariants: InvariantCheck, InvariantSet: "проект"})
 
-	var byJudge bool
-	r, err := a.Ask(t.Context(), "когда будет готово?", func(e Event) {
-		if e.Kind == EventInvariant && strings.Contains(e.Content, "смысловая проверка") {
-			byJudge = true
+	var complained bool
+	r, err := a.Ask(t.Context(), "давай на Python", func(e Event) {
+		if e.Kind == EventInvariant && strings.Contains(e.Label, "нарушен") {
+			complained = true
 		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !byJudge {
-		t.Fatal("нарушение, найденное внешней моделью, не помечено")
+	if complained {
+		t.Fatal("корректный отказ принят за нарушение")
 	}
-	if !strings.Contains(r.Final.Content, "если") {
-		t.Fatalf("ответ не переписан: %q", r.Final.Content)
+	if !strings.Contains(r.Final.Content, "Python") {
+		t.Fatal("отказ должен называть то, от чего отказывается")
 	}
-	// Дешёвых правил нарушено не было — значит, был и вызов проверки,
-	// и вызов повтора.
-	if tr := a.Turns(); tr[0].AuxCalls < 2 {
-		t.Fatalf("служебных вызовов %d, ожидали хотя бы 2 (проверка + повтор)", tr[0].AuxCalls)
+	// Один вызов проверки, ни одного повтора.
+	if tr := a.Turns(); tr[0].AuxCalls != 1 {
+		t.Fatalf("лишние служебные вызовы: %+v", tr[0])
 	}
 }
 
-func TestCheckModeSkipsJudge(t *testing.T) {
-	// В режиме check внешняя проверка не запускается — за неё не платим.
-	f := &fakeLLM{}
-	a := invPool(t, judgeProvider{f}).Spawn(Config{Model: "m", Invariants: InvariantCheck, InvariantSet: "проект"})
-	ask(t, a, "когда будет готово?")
+// brokenChecker отвечает на проверку прозой вместо JSON.
+type brokenChecker struct{ *fakeLLM }
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, req := range f.requests {
-		if strings.HasPrefix(req.Messages[0].Content, "Ты проверяешь ответ ассистента") {
-			t.Fatal("в режиме check внешняя проверка запускаться не должна")
+func (p brokenChecker) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	p.fakeLLM.mu.Lock()
+	p.fakeLLM.requests = append(p.fakeLLM.requests, req)
+	p.fakeLLM.mu.Unlock()
+	if isCheck(req) {
+		return reply(req, "Кажется, всё в порядке, но я не уверен.")
+	}
+	return reply(req, "Возьмём Python.")
+}
+
+func (p brokenChecker) ChatStream(ctx context.Context, req llm.Request, on func(llm.Chunk) error) (*llm.Response, error) {
+	return p.Chat(ctx, req)
+}
+
+func TestBrokenCheckerDoesNotEatTheAnswer(t *testing.T) {
+	// Проверка ответила не JSON. Считать это нарушением нельзя: один сбой
+	// превратился бы в лишний вызов и испорченный ответ.
+	f := &fakeLLM{}
+	a := invPool(t, brokenChecker{f}).Spawn(Config{Model: "m", Invariants: InvariantCheck, InvariantSet: "проект"})
+
+	var warned bool
+	r, err := a.Ask(t.Context(), "на чём писать?", func(e Event) {
+		if e.Kind == EventInvariant && strings.Contains(e.Label, "не JSON") {
+			warned = true
 		}
+	})
+	if err != nil {
+		t.Fatalf("сбой проверки не должен ломать ход: %v", err)
+	}
+	if r.Final.Content == "" {
+		t.Fatal("ответ потерян")
+	}
+	if !warned {
+		t.Fatal("о сбое проверки должно быть предупреждение")
+	}
+}
+
+func TestStageLimitsWhichRulesAreChecked(t *testing.T) {
+	// Правило чужой стадии не уходит ни в промпт, ни в проверку.
+	root := t.TempDir()
+	dir := filepath.Join(root, "проект")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "код.md"),
+		[]byte("---\nstages: [planning]\n---\n\nНа планировании код не пишем.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &fakeLLM{}
+	p := NewPool(f, "fake", nil)
+	p.SetInvariantStore(invariant.NewFileStore(root))
+	a := p.Spawn(Config{Model: "m", System: "sys", Invariants: InvariantPrompt, InvariantSet: "проект",
+		TaskState: TaskManual, Task: "бот"})
+
+	ask(t, a, "что делаем?")
+	if !strings.Contains(systemOf(f.last()), "код не пишем") {
+		t.Fatal("правило стадии planning должно действовать в planning")
+	}
+
+	if err := a.Stage("execution", "план одобрен"); err != nil {
+		t.Fatal(err)
+	}
+	ask(t, a, "что дальше?")
+	if strings.Contains(systemOf(f.last()), "код не пишем") {
+		t.Fatal("правило стадии planning не должно действовать в execution")
 	}
 }
 
