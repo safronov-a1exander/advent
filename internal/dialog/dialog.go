@@ -10,6 +10,7 @@
 package dialog
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -119,7 +120,13 @@ func Load(path string) (*Scenario, error) {
 		return nil, err
 	}
 	var s Scenario
-	if err := yaml.Unmarshal(b, &s); err != nil {
+	// Строгий разбор: неизвестное поле — ошибка, а не тишина. На одиннадцатом
+	// дне сценарий полдня «проверял» ответ полем forbid, которого в структуре
+	// ещё не было, и YAML молча его проглатывал. Проверка, которая ничего
+	// не проверяет, хуже отсутствующей.
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(&s); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	switch {
@@ -492,5 +499,8 @@ func runMemoryCommand(a *agent.Agent, l Line, cmd string) Step {
 		}
 	}
 	st.Branch = a.ActiveBranch()
+	// Стадия после команды, а не до: при отказе она та же, и в отчёте
+	// сразу видно, что перейти не удалось.
+	st.State = stateOf(a)
 	return st
 }

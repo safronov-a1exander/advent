@@ -200,6 +200,7 @@ func (m *Model) stageCommand(arg string) {
 	if arg == "" {
 		m.pushLine("")
 		m.pushLine(stNote.Render("◆ " + tk.Resume()))
+		m.pushLine(stDim.Render("   " + stageMoves(tk)))
 		m.refresh()
 		return
 	}

@@ -38,6 +38,23 @@ const (
 	TaskAuto = "auto"
 )
 
+// Режимы карты переходов — поле Config.TaskMap (день 15).
+const (
+	// TaskMapCode — карта переходов проверяется кодом. Обычный режим.
+	TaskMapCode = ""
+	// TaskMapPrompt — правила переходов есть только в тексте промпта,
+	// код их не проверяет. Нужен ровно для сравнения в отчёте дня.
+	TaskMapPrompt = "prompt"
+)
+
+// transitions — карта, по которой агент проверяет переходы.
+func transitions(cfg Config) task.Transitions {
+	if cfg.TaskMap == TaskMapPrompt {
+		return task.Open
+	}
+	return task.DefaultTransitions
+}
+
 // TaskModes — порядок перебора в панели.
 var TaskModes = []string{TaskOff, TaskManual, TaskAuto}
 
@@ -90,6 +107,9 @@ func (a *Agent) SaveTask() error {
 
 // Stage переводит задачу в стадию руками. Проверка допустимости та же,
 // что у служебного вызова: пользователю можно не больше, чем агенту.
+//
+// Это важнее, чем кажется. Если руками можно то, чего нельзя агенту,
+// запрет превращается в неудобство: «ассистент отказался — переставлю сам».
 func (a *Agent) Stage(to task.State, note string) error {
 	a.mu.Lock()
 	t := a.task
@@ -97,20 +117,13 @@ func (a *Agent) Stage(to task.State, note string) error {
 	if t == nil {
 		return fmt.Errorf("у агента нет задачи: включи поле «задача» в настройках")
 	}
-	if !to.Valid() {
-		return fmt.Errorf("неизвестная стадия %q", to)
-	}
-	if to == t.State {
-		return fmt.Errorf("задача уже в стадии %s", to)
-	}
-	if !task.Allow(t.State, to) {
-		return fmt.Errorf("из %s нельзя сразу в %s", t.State, to)
-	}
-	if err := t.Advance(to, note); err != nil {
-		return err
-	}
+	// Move сам разберёт, что не так: выдуманная стадия, прыжок через этап
+	// или неготовое условие. Текст ошибки показывают пользователю как есть.
+	err := t.Move(to, note, transitions(a.Config()))
+	// Сохраняем в обоих случаях: отказ — тоже событие задачи, он записан
+	// в журнал, и терять его не за что.
 	a.taskChanged()
-	return nil
+	return err
 }
 
 // Step отмечает текущий шаг сделанным.
@@ -189,7 +202,7 @@ func (a *Agent) advanceTask(ctx context.Context, cfg Config, t *task.Task, quest
 		return
 	}
 
-	changes := t.Apply(u)
+	changes := t.Apply(u, transitions(cfg))
 	if changes == "" {
 		on(Event{Kind: EventContext, Label: "задача: без изменений",
 			Usage: resp.Usage, CostUSD: resp.CostUSD, Latency: time.Since(start)})

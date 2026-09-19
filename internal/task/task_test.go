@@ -21,7 +21,7 @@ func TestBlockShowsWhereWeAre(t *testing.T) {
 		"→ 2. хендлеры",
 		"[СДЕЛАНО]",
 		"[ЖДЁМ]    подтвердить формат слотов",
-		"не перепрыгивай стадии",
+		"из planning сейчас можно только в: execution (выполнение)",
 	} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("в блоке нет %q:\n%s", want, b)
@@ -29,28 +29,6 @@ func TestBlockShowsWhereWeAre(t *testing.T) {
 	}
 	if (*Task)(nil).Block() != "" {
 		t.Fatal("без задачи блок пустой")
-	}
-}
-
-func TestAdvanceOnlyForward(t *testing.T) {
-	// День 13 знает только happy path: следующая стадия и всё.
-	// Откаты и запреты — день 15.
-	cases := []struct {
-		from, to State
-		want     bool
-	}{
-		{StatePlanning, StateExecution, true},
-		{StateExecution, StateValidation, true},
-		{StateValidation, StateDone, true},
-		{StatePlanning, StateDone, false},      // прыжок через две
-		{StateExecution, StatePlanning, false}, // назад
-		{StateDone, StateExecution, false},
-		{"выдумано", StateDone, false},
-	}
-	for _, c := range cases {
-		if got := Allow(c.from, c.to); got != c.want {
-			t.Fatalf("Allow(%s, %s) = %v, ожидали %v", c.from, c.to, got, c.want)
-		}
 	}
 }
 
@@ -63,7 +41,7 @@ func TestApplyMovesStateAndRejectsJumps(t *testing.T) {
 		Advance: StateExecution,
 		Current: "делаю схему",
 		Why:     "пользователь одобрил план",
-	})
+	}, DefaultTransitions)
 	if tk.State != StateExecution || tk.Total() != 2 || tk.Step != 1 {
 		t.Fatalf("после утверждения плана: %s шаг %d из %d", tk.State, tk.Step, tk.Total())
 	}
@@ -72,21 +50,21 @@ func TestApplyMovesStateAndRejectsJumps(t *testing.T) {
 	}
 
 	// Прыжок через стадию отклоняется кодом, а не уговорами.
-	got = tk.Apply(Update{Advance: StateDone})
+	got = tk.Apply(Update{Advance: StateDone}, DefaultTransitions)
 	if tk.State != StateExecution {
 		t.Fatalf("прыжок execution → done прошёл: %s", tk.State)
 	}
-	if !strings.Contains(got, "отклонён") {
-		t.Fatalf("об отклонении не сказано: %q", got)
+	if !strings.Contains(got, "запрещён") {
+		t.Fatalf("об отказе не сказано: %q", got)
 	}
 
 	// Пустое предложение ничего не меняет и ничего не пишет в ленту.
-	if got := tk.Apply(Update{}); got != "" {
+	if got := tk.Apply(Update{}, DefaultTransitions); got != "" {
 		t.Fatalf("пустое обновление что-то поменяло: %q", got)
 	}
 
 	// План кладётся один раз: второй согласованный план не затирает первый.
-	tk.Apply(Update{Plan: []string{"другое", "совсем"}})
+	tk.Apply(Update{Plan: []string{"другое", "совсем"}}, DefaultTransitions)
 	if tk.Total() != 2 || tk.Plan[0] != "схема" {
 		t.Fatalf("план перезаписан: %v", tk.Plan)
 	}

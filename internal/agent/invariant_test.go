@@ -318,6 +318,8 @@ func TestStageLimitsWhichRulesAreChecked(t *testing.T) {
 		t.Fatal("правило стадии planning должно действовать в planning")
 	}
 
+	// План — условие перехода в execution (день 15), иначе переход отклонят.
+	a.Task().SetPlan([]string{"схема", "хендлеры"})
 	if err := a.Stage("execution", "план одобрен"); err != nil {
 		t.Fatal(err)
 	}

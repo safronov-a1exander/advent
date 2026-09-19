@@ -141,6 +141,11 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 		}
 		fmt.Fprintf(&b, "## Задача к концу прогона — %s\n\n", r.Variant.Name)
 		fmt.Fprintf(&b, "%s\n\n", r.Task.Resume())
+		// День 15: сколько раз задаче отказали в переходе. Ноль у варианта
+		// без карты — не порядок, а отсутствие проверки.
+		if n := r.Task.Rejected(); n > 0 {
+			fmt.Fprintf(&b, "Отказов в переходах: **%d** (подробности в журнале ниже).\n\n", n)
+		}
 		if len(r.Task.Plan) > 0 {
 			b.WriteString("| # | шаг плана | сделан |\n|---:|---|---|\n")
 			for i, s := range r.Task.Plan {
@@ -261,6 +266,9 @@ func VariantLabel(r Result) string {
 	}
 	if c.TaskState != "" {
 		label += " + " + agent.TaskLabel(c.TaskState)
+		if c.TaskMap == agent.TaskMapPrompt {
+			label += " (карта только в промпте)"
+		}
 	}
 	return label
 }

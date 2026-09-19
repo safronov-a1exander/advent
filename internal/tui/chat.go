@@ -29,6 +29,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/task"
 )
 
 // ---- сообщения ----
@@ -613,6 +614,14 @@ func (m *Model) dumpAgent() {
 			}
 			m.pushLine(stDim.Render(fmt.Sprintf("    %s %d. %s", mark, i+1, s)))
 		}
+		// День 15: куда из этой стадии можно и сколько раз задаче отказали.
+		// Частые отказы — не победа защиты, а признак, что карта расходится
+		// с тем, как человек на самом деле работает.
+		moves := stageMoves(tk)
+		if cfg.TaskMap == agent.TaskMapPrompt {
+			moves += " · код карту не проверяет: правила только в промпте"
+		}
+		m.pushLine(stDim.Render("    " + moves))
 	}
 	// День 14: какие правила действуют прямо сейчас и чем проверяются.
 	if set := m.ag.Invariants(); set != nil {
@@ -1018,4 +1027,21 @@ func short(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// stageMoves — строка «куда можно» для Ctrl+D.
+func stageMoves(tk *task.Task) string {
+	allowed := task.DefaultTransitions.AllowedFrom(tk.State)
+	line := "переходы: из этой стадии ходов нет"
+	if len(allowed) > 0 {
+		names := make([]string, len(allowed))
+		for i, st := range allowed {
+			names[i] = string(st)
+		}
+		line = fmt.Sprintf("переходы: %s → %s", tk.State, strings.Join(names, ", "))
+	}
+	if n := tk.Rejected(); n > 0 {
+		line += fmt.Sprintf(" · отказов: %d", n)
+	}
+	return line
 }

@@ -307,15 +307,27 @@ func mockTask(msgs []message) string {
 	q, _, _ = strings.Cut(q, "Ответ ассистента:")
 	q = strings.ToLower(strings.Join(strings.Fields(q), " "))
 
+	// День 15: проза вместо JSON — тот самый сход с маршрута, на котором
+	// «ломается вся цепочка». На репетиции он должен встречаться, иначе
+	// его нечем показать.
+	if strings.Contains(q, "игнорируй") {
+		return "Конечно, давайте без формальностей — сделаю всё сразу."
+	}
+
 	u := map[string]any{}
 	switch {
-	case strings.Contains(q, "утвержд") || strings.Contains(q, "приступай"):
+	case strings.Contains(q, "утвержд") || strings.Contains(q, "приступай") || strings.Contains(q, "план принят"):
 		u["plan"] = []string{"схема базы", "хендлеры", "слоты", "напоминания", "тесты"}
 		u["advance"] = "execution"
 		u["current"] = "схема базы"
 		u["why"] = "план утверждён"
 	case strings.Contains(q, "готов") || strings.Contains(q, "сделал"):
 		u["completed"] = q
+	case strings.Contains(q, "нашла ошибку") || strings.Contains(q, "возвращаемся"):
+		u["advance"] = "execution" // откат: проверка нашла недоделку (день 15)
+		u["why"] = "проверка нашла недоделку"
+	case strings.Contains(q, "провер"):
+		u["advance"] = "validation"
 	case strings.Contains(q, "заверш") || strings.Contains(q, "закрыт"):
 		u["advance"] = "done" // попытка прыгнуть через validation
 	}
