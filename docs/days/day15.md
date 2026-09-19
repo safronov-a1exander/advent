@@ -202,10 +202,10 @@ go run ./cmd/advent dialog -scenario scenarios/day15-transitions.yaml
 ## Запись демо
 
 ```powershell
-Remove-Item -Recurse -Force runs\sessions-day15 -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force runs\sessions-day15, runs\tasks-day15 -ErrorAction SilentlyContinue
 $t = 'advent · день 15 — контролируемые переходы'
 $sys = 'Ты ведущий разработчик и помогаешь довести задачу до конца. Отвечай по-русски, коротко и по делу.'
 .\scripts\demo.ps1 -Name day15 -MaxSeconds 2400 -AppArgsList @(
-  @('demo','-script','scripts/day15.demo','-thinking','disabled','-system',$sys,'-task-state','auto','-task','бот барбершопа','-sessions','runs/sessions-day15','-new','-title',$t),
+  @('demo','-script','scripts/day15.demo','-thinking','disabled','-system',$sys,'-task-state','auto','-task','бот барбершопа','-tasks-dir','runs/tasks-day15','-sessions','runs/sessions-day15','-new','-title',$t),
   @('dialog','-scenario','scenarios/day15-transitions.yaml','-hold','30s'))
 ```
