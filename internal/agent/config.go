@@ -58,6 +58,12 @@ type Config struct {
 	Memory string `yaml:"memory" json:"memory,omitempty"`
 	User   string `yaml:"user" json:"user,omitempty"`
 	Task   string `yaml:"task" json:"task,omitempty"`
+	// Invariants — режим инвариантов (день 14): "" (нет), "prompt"
+	// (только в промпте), "check" (плюс проверка ответа кодом), "judge"
+	// (плюс внешняя LLM). InvariantSet — id набора: invariants/<id>.yaml.
+	Invariants   string `yaml:"invariants" json:"invariants,omitempty"`
+	InvariantSet string `yaml:"invariant_set" json:"invariant_set,omitempty"`
+
 	// TaskState — режим состояния задачи (день 13): "" (без стадий),
 	// "manual" (стадии в промпте, двигает пользователь), "auto" (плюс
 	// служебный вызов продвижения). Ключ задачи — то же поле Task, что
@@ -180,6 +186,13 @@ func (c Config) Summary() string {
 	if c.TaskState != "" {
 		parts = append(parts, "стадии: "+c.TaskState)
 	}
+	if c.Invariants != "" {
+		inv := "инварианты: " + c.Invariants
+		if c.InvariantSet != "" {
+			inv += " · " + c.InvariantSet
+		}
+		parts = append(parts, inv)
+	}
 	if c.Memory != "" {
 		mem := "память: " + c.Memory
 		if c.User != "" {
@@ -259,6 +272,12 @@ func overlay(base, top Config) Config {
 	}
 	if top.TaskState != "" {
 		out.TaskState = top.TaskState
+	}
+	if top.Invariants != "" {
+		out.Invariants = top.Invariants
+	}
+	if top.InvariantSet != "" {
+		out.InvariantSet = top.InvariantSet
 	}
 	if top.Memory != "" {
 		out.Memory = top.Memory

@@ -44,6 +44,11 @@ type Settings struct {
 	// День 13 — режим состояния задачи.
 	TaskState string
 
+	// День 14 — инварианты: режим проверки, набор и список доступных.
+	Invariants   string
+	InvariantSet string
+	InvariantIDs []string
+
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
 	Profiles []string
@@ -295,6 +300,22 @@ func (s *Settings) Fields() []Field {
 		st.HintFn = func() string { return agent.TaskHint(s.TaskState) }
 		f = append(f, st)
 
+		// День 14 — инварианты. После стадий: часть правил действует только
+		// на некоторых стадиях, и читаются они рядом.
+		iv := EnumField("инварианты", "", agent.InvariantModes,
+			func() string { return s.Invariants },
+			func(v string) { s.Invariants = v })
+		iv.Value = func() string { return agent.InvariantLabel(s.Invariants) }
+		iv.HintFn = func() string { return agent.InvariantHint(s.Invariants) }
+		ivSet := EnumField("набор правил",
+			"какой набор из invariants/*.yaml действует. Пусто — ограничений нет",
+			s.invariantIDs(),
+			func() string { return s.InvariantSet },
+			func(v string) { s.InvariantSet = v })
+		ivSet.Text = func() string { return s.InvariantSet }
+		ivSet.SetText = func(v string) error { s.InvariantSet = strings.TrimSpace(v); return nil }
+		f = append(f, iv, ivSet)
+
 		// День 11 — слои памяти. Ключи слоёв рядом с режимом: сменить задачу
 		// значит сменить рабочую память, и это должно быть видно в одном месте.
 		mem := EnumField("память", "", agent.MemoryModes,
@@ -334,6 +355,22 @@ func (s *Settings) Fields() []Field {
 			1, 1, 20, 3))
 	}
 	return f
+}
+
+// invariantIDs — наборы правил для перебора стрелками.
+func (s *Settings) invariantIDs() []string {
+	ids := []string{""}
+	seen := map[string]bool{"": true}
+	for _, id := range s.InvariantIDs {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if s.InvariantSet != "" && !seen[s.InvariantSet] {
+		ids = append(ids, s.InvariantSet)
+	}
+	return ids
 }
 
 // profileIDs — что можно перебрать стрелками: пусто (без профиля) и всё,
@@ -385,6 +422,8 @@ func (s *Settings) AgentConfig() agent.Config {
 		SummarizeEvery: s.SummarizeEvery,
 		Profile:        s.Profile,
 		TaskState:      s.TaskState,
+		Invariants:     s.Invariants,
+		InvariantSet:   s.InvariantSet,
 		Memory:         s.Memory,
 		User:           s.User,
 		Task:           s.Task,
@@ -412,6 +451,8 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.SummarizeEvery = c.SummarizeEvery
 	s.Profile = c.Profile
 	s.TaskState = c.TaskState
+	s.Invariants = c.Invariants
+	s.InvariantSet = c.InvariantSet
 	s.Memory = c.Memory
 	s.User = c.User
 	s.Task = c.Task

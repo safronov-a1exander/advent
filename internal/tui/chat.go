@@ -614,6 +614,22 @@ func (m *Model) dumpAgent() {
 			m.pushLine(stDim.Render(fmt.Sprintf("    %s %d. %s", mark, i+1, s)))
 		}
 	}
+	// День 14: какие правила действуют прямо сейчас и чем проверяются.
+	if set := m.ag.Invariants(); set != nil {
+		stage := ""
+		if tk := m.ag.Task(); tk != nil {
+			stage = string(tk.State)
+		}
+		m.pushLine(stDim.Render(fmt.Sprintf("  правила  %s · режим «%s»", set.Summary(), agent.InvariantLabel(cfg.Invariants))))
+		for _, inv := range set.List() {
+			mark := "  "
+			if !inv.Active(stage) {
+				mark = "· " // правило чужой стадии — не действует сейчас
+			}
+			m.pushLine(stDim.Render(fmt.Sprintf("    %s%s", mark, shorten(inv.Rule, 100))))
+			m.pushLine(stDim.Render("        " + inv.Filters()))
+		}
+	}
 	// День 11: слои памяти — отдельно от истории. Это прямой ответ на вопрос
 	// задания «какие данные попадают в каждый слой».
 	if mem := m.ag.Memory(); mem != nil {
@@ -704,6 +720,23 @@ func (m *Model) onEvent(e agent.Event) {
 			road += ": " + e.Content
 		}
 		m.pushLine(stNote.Render(road))
+	case agent.EventInvariant:
+		// Нарушение — это красным: пользователь должен видеть, что ответ,
+		// который он читает, уже переписан, а не родился таким.
+		st := stNote
+		if strings.Contains(e.Label, "нарушен") || strings.Contains(e.Label, "не удал") {
+			st = stErr
+		}
+		m.pushLine(st.Render("⛔ " + e.Label))
+		for _, l := range strings.Split(shorten2(e.Content, 6), "\n") {
+			if strings.TrimSpace(l) != "" {
+				m.pushLine(stDim.Render("  " + l))
+			}
+		}
+		if e.Usage.PromptTokens > 0 {
+			m.pushLine(stDim.Render(fmt.Sprintf("  ↳ служебный вызов: вход %d · выход %d токенов · %s",
+				e.Usage.PromptTokens, e.Usage.CompletionTokens, e.Latency.Round(time.Millisecond))))
+		}
 	case agent.EventContext:
 		if e.Usage.PromptTokens == 0 {
 			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))
@@ -848,6 +881,9 @@ func (m *Model) View() tea.View {
 	}
 	if tk := m.ag.Task(); tk != nil {
 		header += "  " + stNote.Render("◆ "+tk.Summary())
+	}
+	if set := m.ag.Invariants(); set != nil {
+		header += "  " + stNote.Render("⛔ "+set.Summary())
 	}
 	if mh := memoryHeader(m.ag); mh != "" {
 		header += "  " + stNote.Render(mh)

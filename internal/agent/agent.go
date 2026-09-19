@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
@@ -56,6 +57,9 @@ const (
 	// в сводку (день 9), обновление фактов (день 10) или раскладка новой
 	// реплики по слоям памяти (день 11).
 	EventContext
+	// EventInvariant — проверка ответа на инварианты (день 14): нарушение,
+	// повтор или успешное исправление.
+	EventInvariant
 	// EventPipeline — профиль выбрал дорогу для этого запроса (день 12).
 	// Не вызов API, а решение: пользователь должен видеть, куда свернул
 	// его запрос, до того как получит ответ.
@@ -161,6 +165,10 @@ type Agent struct {
 	// newTask и saveTask — как поднять и сохранить задачу; ставит пул.
 	newTask  func(Config) (*task.Task, error)
 	saveTask func(*task.Task) error
+	// inv — набор инвариантов: чего нельзя никогда (день 14).
+	inv *invariant.Set
+	// newInv — как поднять набор по id; ставит пул.
+	newInv func(string) (*invariant.Set, error)
 	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
 	// разговора меняют задачу или пользователя: слои должны переехать
 	// на другие файлы, а не продолжать писать в прежние.
@@ -215,6 +223,12 @@ func (a *Agent) SetConfig(c Config) {
 	// рабочая память прежней задачи в новой задаче неверна, а чужой
 	// долговременный слой — тем более. Краткосрочный слой при этом остаётся:
 	// разговор тот же (день 11).
+	// Сменили набор инвариантов — поднимаем другой.
+	if a.newInv != nil && a.cfg.InvariantSet != c.InvariantSet {
+		if set, err := a.newInv(c.InvariantSet); err == nil {
+			a.inv = set
+		}
+	}
 	// Сменили профиль — поднимаем другой. Ошибка чтения не должна ломать
 	// разговор: остаётся прежний профиль, а о сбое скажет пул (день 12).
 	if a.newProf != nil && a.cfg.Profile != c.Profile {
@@ -323,6 +337,9 @@ func (a *Agent) Messages(text string) []llm.Message {
 	if b := taskBlock(a.cfg, a.task); b != "" {
 		system = joinSystem(system, b)
 	}
+	if b := invariantBlock(a.cfg, a.inv, stageOf(a.task)); b != "" {
+		system = joinSystem(system, b)
+	}
 	system = withMemory(system, a.memoryBlocks(a.cfg, a.mem))
 	return compose(system, past, text)
 }
@@ -380,6 +397,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	prof := a.prof
 	catalog := a.catalog
 	tsk := a.task
+	inv := a.inv
 	gen := a.gen
 	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
 	a.mu.Unlock()
@@ -406,6 +424,12 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	system = withMemory(system, profileBlocks(prof, pl, picked))
 	// День 13: где мы в задаче — рамка для ответа, поэтому перед памятью.
 	if b := taskBlock(cfg, tsk); b != "" {
+		system = joinSystem(system, b)
+	}
+	// День 14: чего нельзя никогда. Сразу после задачи: часть правил
+	// действует только на некоторых стадиях, и читаться они должны рядом.
+	stage := stageOf(tsk)
+	if b := invariantBlock(cfg, inv, stage); b != "" {
 		system = joinSystem(system, b)
 	}
 	system = withMemory(system, a.memoryBlocks(cfg, mem))
@@ -473,6 +497,15 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		}
 		reply.Final = resp
 	}
+
+	// День 14: ответ проверяется на инварианты и при нарушении переписывается.
+	// До продвижения задачи: двигать стадию по ответу, который пользователь
+	// не увидит, неправильно.
+	final, broke := a.guard(ctx, cfg, inv, stage, compose(system, past, ""), text, reply.Final.Content, &turn, on)
+	if final != reply.Final.Content {
+		reply.Final.Content = final
+	}
+	turn.Violations = len(broke)
 
 	// День 13: продвижение задачи — после ответа, но ДО записи хода в учёт.
 	// После ответа, потому что пока ответа нет, непонятно, закончилась ли

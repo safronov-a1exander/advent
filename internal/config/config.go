@@ -32,6 +32,10 @@ type Config struct {
 	// ProfilesDir — где лежат профили пользователей (день 12). Профиль —
 	// конфиг, а не данные: каталог ложится в репозиторий рядом с кодом.
 	ProfilesDir string `yaml:"profiles_dir"`
+	// InvariantsDir — где лежат наборы инвариантов (день 14). Как и профили,
+	// это конфиг в репозитории, но область другая: профиль привязан
+	// к пользователю, набор инвариантов — к проекту.
+	InvariantsDir string `yaml:"invariants_dir"`
 	// TasksDir — где лежат состояния задач (день 13). Отдельно от памяти:
 	// память задачи отвечает «что мы выяснили», состояние — «где мы в ней».
 	TasksDir string `yaml:"tasks_dir"`
@@ -71,6 +75,9 @@ func Load(dir string) (*Config, error) {
 	}
 	if cfg.ProfilesDir == "" {
 		cfg.ProfilesDir = filepath.Join(dir, "profiles")
+	}
+	if cfg.InvariantsDir == "" {
+		cfg.InvariantsDir = filepath.Join(dir, "invariants")
 	}
 	if cfg.TasksDir == "" {
 		cfg.TasksDir = filepath.Join(dir, "tasks")

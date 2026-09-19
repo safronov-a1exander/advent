@@ -17,6 +17,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/config"
+	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
@@ -50,6 +51,11 @@ type askFlags struct {
 	keepLast        int
 	summarizeEvery  int
 
+	// Инварианты (день 14).
+	invariants    string
+	invariantSet  string
+	invariantsDir string
+
 	// Состояние задачи (день 13).
 	taskState string
 	tasksDir  string
@@ -82,6 +88,9 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.contextStrategy, "context", "", "стратегия контекста для chat/demo: пусто — вся история, window — последние N, facts — факты + последние N, summary — сводка + хвост")
 	fs.IntVar(&a.keepLast, "keep-last", 0, "для window/facts/summary: сколько последних сообщений идёт как есть (0 — по умолчанию)")
 	fs.IntVar(&a.summarizeEvery, "summarize-every", 0, "для summary: сжимать, когда за хвостом накопилось столько сообщений (0 — по умолчанию)")
+	fs.StringVar(&a.invariants, "invariants", "", "инварианты для chat/demo: пусто — нет, prompt — только в промпте, check — плюс проверка кодом, judge — плюс внешняя модель")
+	fs.StringVar(&a.invariantSet, "invariant-set", "", "набор правил: имя файла из invariants/ без расширения")
+	fs.StringVar(&a.invariantsDir, "invariants-dir", "", "каталог наборов инвариантов (по умолчанию invariants_dir из config.yaml)")
 	fs.StringVar(&a.taskState, "task-state", "", "состояние задачи для chat/demo: пусто — без стадий, manual — двигает пользователь, auto — плюс служебный вызов")
 	fs.StringVar(&a.tasksDir, "tasks-dir", "", "каталог состояний задач (по умолчанию tasks_dir из config.yaml)")
 	fs.StringVar(&a.profileID, "profile", "", "профиль пользователя для chat/demo: имя файла из profiles/ без расширения")
@@ -128,6 +137,14 @@ func (a *askFlags) setup() (*llm.Client, *config.Provider, *store.Writer, llm.Re
 		req.MaxTokens = llm.I(a.maxTokens)
 	}
 	return client, prov, w, req, nil
+}
+
+// invariantsStoreDir — каталог наборов инвариантов: флаг важнее config.yaml.
+func (a *askFlags) invariantsStoreDir() string {
+	if a.invariantsDir != "" {
+		return a.invariantsDir
+	}
+	return a.cfg.InvariantsDir
 }
 
 // tasksStoreDir — каталог состояний задач: флаг важнее config.yaml.
@@ -327,6 +344,23 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	}
 	set.TaskState = a.taskState
 	pool.SetTaskStore(task.NewFileStore(a.tasksStoreDir()))
+
+	// День 14: инварианты — рамки проекта; они в репозитории рядом с кодом.
+	if !slices.Contains(agent.InvariantModes, a.invariants) {
+		return fmt.Errorf("-invariants: ожидали пусто, prompt, check или judge, получили %q", a.invariants)
+	}
+	invs := invariant.NewFileStore(a.invariantsStoreDir())
+	pool.SetInvariantStore(invs)
+	if ids, err := invs.List(); err == nil {
+		set.InvariantIDs = ids
+	}
+	if a.invariantSet != "" {
+		if _, err := invs.Load(a.invariantSet); err != nil {
+			return fmt.Errorf("-invariant-set: %w", err)
+		}
+	}
+	set.Invariants = a.invariants
+	set.InvariantSet = a.invariantSet
 
 	// День 11: слои задачи и пользователя переживают и разговор, и перезапуск,
 	// поэтому лежат в своём каталоге, а не в файле разговора. Включаются

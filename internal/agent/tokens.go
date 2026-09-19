@@ -72,6 +72,9 @@ type Turn struct {
 	// Aux* — служебные вызовы стратегии контекста на этом ходе: сжатие
 	// истории (день 9), обновление фактов (день 10). Считаются отдельно:
 	// они сами стоят токенов, и без них сравнение стратегий было бы нечестным.
+	// Violations — сколько инвариантов осталось нарушенными после повторов
+	// (день 14). Ноль — либо нарушений не было, либо их исправили.
+	Violations    int `json:"violations,omitempty"`
 	AuxCalls      int `json:"aux_calls,omitempty"`
 	AuxPrompt     int `json:"aux_prompt_tokens,omitempty"`
 	AuxCompletion int `json:"aux_completion_tokens,omitempty"`

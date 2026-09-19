@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
@@ -51,6 +52,43 @@ type Pool struct {
 	// задача принадлежит не агенту: два разговора об одной задаче должны
 	// видеть одно и то же состояние.
 	taskStore task.Store
+
+	// invStore — где лежат наборы инвариантов (день 14).
+	invStore invariant.Store
+}
+
+// SetInvariantStore включает инварианты.
+func (p *Pool) SetInvariantStore(s invariant.Store) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.invStore = s
+}
+
+// loadInvariants поднимает набор по id; пустой id — без инвариантов.
+func (p *Pool) loadInvariants(id string) (*invariant.Set, error) {
+	p.mu.Lock()
+	st := p.invStore
+	p.mu.Unlock()
+	if st == nil || strings.TrimSpace(id) == "" {
+		return nil, nil
+	}
+	return st.Load(id)
+}
+
+// wireInvariants поднимает набор агента; вызывать под p.mu.
+func (p *Pool) wireInvariants(a *Agent, cfg Config) {
+	a.newInv = p.loadInvariants
+	if p.invStore == nil || strings.TrimSpace(cfg.InvariantSet) == "" {
+		return
+	}
+	set, err := p.invStore.Load(cfg.InvariantSet)
+	if err != nil {
+		// Непрочитанный набор — это агент без ограничений. Сказать об этом
+		// обязательно: молча снятый запрет опаснее любой ошибки.
+		p.saveErr = fmt.Errorf("инварианты %q не прочитались — агент работает без них: %w", cfg.InvariantSet, err)
+		return
+	}
+	a.inv = set
 }
 
 // SetTaskStore включает состояние задач.
@@ -295,6 +333,7 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 	}
 	p.wireProfile(a, cfg)
 	p.wireTask(a, cfg)
+	p.wireInvariants(a, cfg)
 	a.newMem = p.newMemory
 	a.mem, err = newMemory(p.memStore, cfg)
 	if err != nil {
@@ -364,6 +403,7 @@ func (p *Pool) Restore() ([]*Agent, error) {
 		}
 		p.wireProfile(a, snap.Config)
 		p.wireTask(a, snap.Config)
+		p.wireInvariants(a, snap.Config)
 		a.newMem = p.newMemory
 		mem, memErr := newMemory(p.memStore, snap.Config)
 		if memErr != nil {
