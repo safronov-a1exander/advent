@@ -22,6 +22,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/dialog"
+	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
 )
@@ -63,6 +64,7 @@ func cmdDialog(ctx context.Context, args []string) error {
 	pool := agent.NewPool(client, prov.Name, journal)
 	pool.SetProfileStore(profile.NewFileStore(cfg.ProfilesDir))
 	pool.SetCatalog(tiersOf(prov.Models))
+	pool.SetInvariantStore(invariant.NewFileStore(cfg.InvariantsDir))
 
 	started := time.Now()
 	var mu sync.Mutex

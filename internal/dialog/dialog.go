@@ -179,7 +179,10 @@ type Step struct {
 	Branch string
 	// State — в какой стадии задачи шёл ход (день 13).
 	State string
-	Turn  agent.Turn
+	// Violations — сколько инвариантов осталось нарушенными после
+	// повторов (день 14).
+	Violations int
+	Turn       agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
 	Passed  bool
@@ -212,7 +215,10 @@ type Totals struct {
 	AuxCalls                   int
 	Checks, Passed             int
 	Errors                     int
-	Cost                       float64
+	// Violations — сколько ходов ушло к пользователю с нарушенным
+	// инвариантом (день 14).
+	Violations int
+	Cost       float64
 }
 
 // Input — все входные токены варианта, включая служебные вызовы
@@ -235,6 +241,9 @@ func (r Result) Totals() Totals {
 		t.Cost += s.Cost
 		if s.Err != "" {
 			t.Errors++
+		}
+		if s.Violations > 0 {
+			t.Violations++
 		}
 		if s.Checked {
 			t.Checks++
@@ -309,6 +318,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		_, st.Cost = reply.Usage()
 		if turns := a.Turns(); len(turns) > turnsBefore {
 			st.Turn = turns[len(turns)-1]
+			st.Violations = st.Turn.Violations
 		}
 		if st.Checked {
 			st.Passed, st.Missing = check(st.Answer, want)
@@ -372,6 +382,9 @@ func (st Step) Brief(sent bool) string {
 	}
 	if st.State != "" {
 		c += " ◆" + st.State
+	}
+	if st.Violations > 0 {
+		c += fmt.Sprintf(" ⛔%d", st.Violations)
 	}
 	if st.Checked {
 		if st.Passed {
