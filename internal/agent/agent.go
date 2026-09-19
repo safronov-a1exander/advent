@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/store"
 )
 
@@ -50,7 +51,8 @@ const (
 	// EventChunk — очередной кусок финального ответа.
 	EventChunk
 	// EventContext — служебный вызов стратегии контекста: сжатие истории
-	// в сводку (день 9) или обновление фактов (день 10).
+	// в сводку (день 9), обновление фактов (день 10) или раскладка новой
+	// реплики по слоям памяти (день 11).
 	EventContext
 )
 
@@ -137,6 +139,13 @@ type Agent struct {
 	calib   float64      // во сколько раз факт провайдера больше сырой оценки; 0 — ещё не знаем
 	summary summaryState // сводка старой части разговора (день 9)
 	facts   []Fact       // блок фактов для sticky facts (день 10)
+	// mem — слои памяти: краткосрочный (этот разговор), рабочий (задача) и
+	// долговременный (пользователь). nil, если память выключена (день 11).
+	mem *memory.Memory
+	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
+	// разговора меняют задачу или пользователя: слои должны переехать
+	// на другие файлы, а не продолжать писать в прежние.
+	newMem func(Config) *memory.Memory
 
 	// Ветки разговора (день 10, branch.go). Активная ветка — это поля выше,
 	// неактивные отложены в parked.
@@ -183,6 +192,15 @@ func (a *Agent) SetConfig(c Config) {
 		a.mu.Unlock()
 		return
 	}
+	// Смена режима памяти, задачи или пользователя означает другие слои:
+	// рабочая память прежней задачи в новой задаче неверна, а чужой
+	// долговременный слой — тем более. Краткосрочный слой при этом остаётся:
+	// разговор тот же (день 11).
+	if a.newMem != nil && (a.cfg.Memory != c.Memory || a.cfg.User != c.User || a.cfg.Task != c.Task) {
+		chat := a.mem.Layer(memory.ScopeChat).Entries()
+		a.mem = a.newMem(c)
+		a.mem.Layer(memory.ScopeChat).Load(chat)
+	}
 	a.cfg = c.Clone()
 	a.touch()
 	a.mu.Unlock()
@@ -224,6 +242,10 @@ func (a *Agent) Reset() {
 	a.turns = nil // учёт ходов — про разговор; калибровка — про модель, её не трогаем
 	a.summary = summaryState{}
 	a.facts = nil
+	// Краткосрочный слой относится к этому разговору и уходит вместе с ним.
+	// Рабочий и долговременный переживают сброс: задача не кончилась оттого,
+	// что стёрли переписку, и собеседник не стал другим человеком (день 11).
+	a.mem.ClearChat()
 	a.resetBranches() // сброс — новый разговор: ветки и чекпойнты тоже уходят
 	a.gen++
 	a.touch()
@@ -261,7 +283,19 @@ func (a *Agent) Messages(text string) []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	system, past := window(a.cfg, a.history, a.summary, a.facts)
+	system = withMemory(system, a.memoryBlocks(a.cfg, a.mem))
 	return compose(system, past, text)
+}
+
+// withMemory дописывает блоки слоёв к системному промпту. Именно к нему,
+// а не отдельными сообщениями: так их одинаково принимают все
+// OpenAI-совместимые API, и модель читает память как условие разговора,
+// а не как чью-то реплику. Ровно то же решение, что у сводки дня 9.
+func withMemory(system string, blocks []string) string {
+	for _, b := range blocks {
+		system = joinSystem(system, b)
+	}
+	return system
 }
 
 func compose(system string, history []llm.Message, text string) []llm.Message {
@@ -302,6 +336,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	hist := append([]llm.Message(nil), a.history...)
 	sum := a.summary
 	facts := append([]Fact(nil), a.facts...)
+	mem := a.mem
 	gen := a.gen
 	turn := Turn{At: time.Now(), Question: a.calibrated(rawEstimate(text))}
 	a.mu.Unlock()
@@ -312,7 +347,11 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// День 10: факты обновляются по новому сообщению до отправки — вопрос
 	// уходит уже со свежим блоком.
 	facts = a.updateFacts(ctx, cfg, hist, facts, text, gen, &turn, on)
+	// День 11: новая реплика раскладывается по слоям памяти до отправки —
+	// вопрос уходит уже с обновлённой рабочей и долговременной памятью.
+	a.route(ctx, cfg, mem, hist, text, gen, &turn, on)
 	system, past := window(cfg, hist, sum, facts)
+	system = withMemory(system, a.memoryBlocks(cfg, mem))
 
 	a.mu.Lock()
 	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)))

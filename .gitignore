@@ -13,6 +13,7 @@ config.local.yaml
 /recordings/
 /reports/
 /sessions/
+/memory/
 
 # личные заметки и вспомогательные инструменты: в публичный репозиторий
 # не попадают (сюда же уезжает всё, что относится к конкретному потоку курса)
@@ -25,3 +26,6 @@ config.local.yaml
 Thumbs.db
 .idea/
 .vscode/
+
+# случайные бинарники сборок
+/mockllm.exe

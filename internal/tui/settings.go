@@ -41,6 +41,11 @@ type Settings struct {
 	KeepLast       *int
 	SummarizeEvery *int
 
+	// День 11 — модель памяти: режим раскладки и ключи хранимых слоёв.
+	Memory string
+	User   string
+	Task   string
+
 	// День 3 — способ рассуждения. Только для чата: в сценариях цепочки
 	// описаны явно через steps.
 	Strategy string
@@ -262,6 +267,24 @@ func (s *Settings) Fields() []Field {
 				func() *int { return s.SummarizeEvery },
 				func(v *int) { s.SummarizeEvery = v },
 				2, 2, 200, 10))
+
+		// День 11 — слои памяти. Ключи слоёв рядом с режимом: сменить задачу
+		// значит сменить рабочую память, и это должно быть видно в одном месте.
+		mem := EnumField("память", "", agent.MemoryModes,
+			func() string { return s.Memory },
+			func(v string) { s.Memory = v })
+		mem.Value = func() string { return agent.MemoryLabel(s.Memory) }
+		mem.HintFn = func() string { return agent.MemoryHint(s.Memory) }
+		f = append(f, mem,
+			TextField("юзер",
+				"чей долговременный слой: профиль и знания о собеседнике. Пусто — слой живёт только в процессе",
+				func() string { return s.User },
+				func(v string) { s.User = v }),
+			TextField("задача",
+				"какой задачи рабочий слой. Сменить задачу — сменить рабочую память; долговременная останется",
+				func() string { return s.Task },
+				func(v string) { s.Task = v }),
+		)
 	}
 
 	if s.Overlay {
@@ -315,6 +338,9 @@ func (s *Settings) AgentConfig() agent.Config {
 		Context:        s.Context,
 		KeepLast:       s.KeepLast,
 		SummarizeEvery: s.SummarizeEvery,
+		Memory:         s.Memory,
+		User:           s.User,
+		Task:           s.Task,
 	}.Clone()
 }
 
@@ -337,6 +363,9 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.Context = c.Context
 	s.KeepLast = c.KeepLast
 	s.SummarizeEvery = c.SummarizeEvery
+	s.Memory = c.Memory
+	s.User = c.User
+	s.Task = c.Task
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

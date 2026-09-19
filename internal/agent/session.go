@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // Сохранение разговоров между запусками (день 7).
@@ -50,6 +51,11 @@ type Snapshot struct {
 	Summary *summaryState `json:"summary,omitempty"`
 	// Facts — блок фактов sticky facts (день 10).
 	Facts []Fact `json:"facts,omitempty"`
+	// ChatMemory — краткосрочный слой памяти (день 11). Рабочий и
+	// долговременный слои сюда не попадают: они принадлежат задаче и
+	// пользователю и лежат в своих файлах, иначе два разговора об одной
+	// задаче хранили бы две расходящиеся копии одного и того же.
+	ChatMemory []memory.Entry `json:"chat_memory,omitempty"`
 
 	// Ветки (день 10): History, Turns, Summary и Facts выше — активная ветка,
 	// остальные лежат в Parked.
@@ -91,6 +97,7 @@ func (a *Agent) snapshot() Snapshot {
 		Calibration: a.calib,
 		Summary:     summaryPtr(a.summary),
 		Facts:       append([]Fact(nil), a.facts...),
+		ChatMemory:  a.mem.Layer(memory.ScopeChat).Entries(),
 
 		Branch:      a.branch,
 		Parked:      cloneThreads(a.parked),

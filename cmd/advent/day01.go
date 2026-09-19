@@ -18,6 +18,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/store"
 	"github.com/safronov-a1exander/advent/internal/tui"
 )
@@ -47,6 +48,12 @@ type askFlags struct {
 	keepLast        int
 	summarizeEvery  int
 
+	// Модель памяти (день 11): режим раскладки и ключи хранимых слоёв.
+	memoryMode string
+	memoryUser string
+	memoryTask string
+	memoryDir  string
+
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
 }
@@ -65,6 +72,10 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.contextStrategy, "context", "", "стратегия контекста для chat/demo: пусто — вся история, window — последние N, facts — факты + последние N, summary — сводка + хвост")
 	fs.IntVar(&a.keepLast, "keep-last", 0, "для window/facts/summary: сколько последних сообщений идёт как есть (0 — по умолчанию)")
 	fs.IntVar(&a.summarizeEvery, "summarize-every", 0, "для summary: сжимать, когда за хвостом накопилось столько сообщений (0 — по умолчанию)")
+	fs.StringVar(&a.memoryMode, "memory", "", "слои памяти для chat/demo: пусто — выключены, manual — кладёт пользователь, auto — плюс раскладка агентом")
+	fs.StringVar(&a.memoryUser, "user", "", "чей долговременный слой памяти")
+	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
+	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
 }
 
@@ -103,6 +114,14 @@ func (a *askFlags) setup() (*llm.Client, *config.Provider, *store.Writer, llm.Re
 		req.MaxTokens = llm.I(a.maxTokens)
 	}
 	return client, prov, w, req, nil
+}
+
+// memoryStoreDir — каталог слоёв памяти: флаг важнее config.yaml.
+func (a *askFlags) memoryStoreDir() string {
+	if a.memoryDir != "" {
+		return a.memoryDir
+	}
+	return a.cfg.MemoryDir
 }
 
 func cmdAsk(ctx context.Context, args []string) error {
@@ -228,6 +247,12 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	if a.summarizeEvery > 0 {
 		set.SummarizeEvery = llm.I(a.summarizeEvery)
 	}
+	if !slices.Contains(agent.MemoryModes, a.memoryMode) {
+		return fmt.Errorf("-memory: ожидали пусто, manual или auto, получили %q", a.memoryMode)
+	}
+	set.Memory = a.memoryMode
+	set.User = a.memoryUser
+	set.Task = a.memoryTask
 
 	// Экран не ходит в API сам: он говорит с агентами из пула, а пул
 	// пишет каждый вызов в тот же журнал runs/*.jsonl.
@@ -240,6 +265,11 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		Resume:   sf.resume,
 		Fresh:    sf.fresh,
 	}
+	// День 11: слои задачи и пользователя переживают и разговор, и перезапуск,
+	// поэтому лежат в своём каталоге, а не в файле разговора. Включаются
+	// всегда: агент без памяти их просто не заведёт.
+	pool.SetMemoryStore(memory.NewFileStore(a.memoryStoreDir()))
+
 	// День 7: разговоры переживают перезапуск. Пул сохраняет агентов
 	// в каталог сессий и при старте поднимает всех обратно.
 	if !sf.noSave {

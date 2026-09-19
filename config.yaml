@@ -7,6 +7,10 @@ runs_dir: runs
 reports_dir: reports
 # Сохранённые разговоры агентов: по JSON-файлу на агента (день 7).
 sessions_dir: sessions
+# Слои памяти, переживающие разговор (день 11): memory/users/<юзер>.json
+# и memory/tasks/<задача>.json. Краткосрочный слой сюда не попадает —
+# он живёт в файле разговора.
+memory_dir: memory
 
 providers:
   - name: deepseek

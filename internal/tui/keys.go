@@ -22,6 +22,7 @@ type chatKeys struct {
 	Spawn    key.Binding
 	Switch   key.Binding
 	Branches key.Binding
+	Memory   key.Binding
 	Debug    key.Binding
 	Tokens   key.Binding
 	Bench    key.Binding
@@ -72,6 +73,20 @@ func newBranchKeys() branchKeys {
 	}
 }
 
+type memoryKeys struct {
+	Move   key.Binding
+	Forget key.Binding
+	Back   key.Binding
+}
+
+func newMemoryKeys() memoryKeys {
+	return memoryKeys{
+		Move:   key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "выбор")),
+		Forget: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Del", "забыть запись")),
+		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "в диалог")),
+	}
+}
+
 type labKeys struct {
 	Run     key.Binding
 	Scroll  key.Binding
@@ -94,6 +109,7 @@ func newChatKeys(withBench bool) chatKeys {
 		Spawn:    key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("Ctrl+N", "новый агент")),
 		Switch:   key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("Ctrl+O", "агенты")),
 		Branches: key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("Ctrl+B", "ветки")),
+		Memory:   key.NewBinding(key.WithKeys("ctrl+m"), key.WithHelp("Ctrl+M", "память")),
 		Debug:    key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl+D", "внутри агента")),
 		Tokens:   key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("Ctrl+T", "токены")),
 		Bench:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("Ctrl+E", "все модели")),

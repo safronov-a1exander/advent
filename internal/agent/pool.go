@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // Pool порождает агентов и держит их в одном процессе.
@@ -32,6 +33,56 @@ type Pool struct {
 	// store — куда сохранять разговоры; nil — пул живёт только в памяти.
 	store   Store
 	saveErr error // последняя ошибка сохранения, забирается SaveErr
+
+	// memStore — где лежат хранимые слои памяти (день 11). Общий на пул:
+	// слои принадлежат задаче и пользователю, а не агенту, и два разговора
+	// об одной задаче должны видеть одну и ту же рабочую память.
+	memStore memory.Store
+}
+
+// SetMemoryStore включает слои памяти: у каждого агента с непустым режимом
+// памяти появятся рабочий и долговременный слои из этого хранилища.
+func (p *Pool) SetMemoryStore(s memory.Store) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.memStore = s
+}
+
+// MemoryStore — хранилище слоёв или nil.
+func (p *Pool) MemoryStore() memory.Store {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.memStore
+}
+
+// newMemory — слои под конфиг агента. Возвращает nil, если память выключена:
+// nil-память везде ведёт себя как пустая, и проверять её отдельно не надо.
+//
+// Хранилище может быть и nil — тогда слои живут в процессе. Это нужно
+// сравнению вариантов: два варианта одного сценария не должны писать
+// в один файл и подсматривать друг у друга.
+func (p *Pool) newMemory(cfg Config) *memory.Memory {
+	p.mu.Lock()
+	st := p.memStore
+	p.mu.Unlock()
+	m, err := newMemory(st, cfg)
+	if err != nil {
+		p.mu.Lock()
+		p.saveErr = err
+		p.mu.Unlock()
+	}
+	return m
+}
+
+// newMemory — слои под конфиг без блокировок пула. Отдельная функция нужна
+// затем, что spawn и Restore собирают агентов уже под p.mu, а мьютекс пула
+// не рекурсивный.
+func newMemory(st memory.Store, cfg Config) (*memory.Memory, error) {
+	if cfg.Memory == MemoryOff {
+		return nil, nil
+	}
+	m := memory.New(st, cfg.User, cfg.Task)
+	return m, m.Restore()
 }
 
 // SetStore включает сохранение: каждый постоянный агент пишется в store
@@ -104,6 +155,7 @@ func (p *Pool) SpawnTemp(cfg Config) *Agent {
 func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	var err error
 	p.seq++
 	name := strings.TrimSpace(cfg.Name)
 	if name == "" {
@@ -116,6 +168,11 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 		journal:  p.journal,
 		cfg:      cfg.Clone(),
 		temp:     temp,
+	}
+	a.newMem = p.newMemory
+	a.mem, err = newMemory(p.memStore, cfg)
+	if err != nil {
+		p.saveErr = err
 	}
 	a.created = time.Now()
 	a.updated = a.created
@@ -178,6 +235,17 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			created:  snap.Created,
 			updated:  snap.Updated,
 			rev:      snap.Rev,
+		}
+		a.newMem = p.newMemory
+		mem, memErr := newMemory(p.memStore, snap.Config)
+		if memErr != nil {
+			p.saveErr = memErr
+		}
+		a.mem = mem
+		// Краткосрочный слой лежит в файле разговора рядом с историей:
+		// он принадлежит этому разговору, а не задаче (день 11).
+		if a.mem != nil {
+			a.mem.Layer(memory.ScopeChat).Load(snap.ChatMemory)
 		}
 		if snap.Summary != nil {
 			a.summary = *snap.Summary

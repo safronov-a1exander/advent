@@ -9,6 +9,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
 // echoLLM — провайдер без памяти: на вопрос с «?» отвечает всем, что знает
@@ -171,12 +172,96 @@ func TestLoadVariantWithBranches(t *testing.T) {
 }
 
 func TestCheckIgnoresCaseAndSpacesInNumbers(t *testing.T) {
-	ok, missing := check("Осталось 21 135 ₽, Саша", []string{"21135", "саша"})
+	ok, missing := check("Осталось 21 135 ₽, Саша", Line{Expect: []string{"21135", "саша"}})
 	if !ok || len(missing) != 0 {
 		t.Fatalf("проверка не прошла: %v", missing)
 	}
-	ok, missing = check("не помню", []string{"10000"})
+	ok, missing = check("не помню", Line{Expect: []string{"10000"}})
 	if ok || len(missing) != 1 {
 		t.Fatal("ложное срабатывание проверки")
+	}
+}
+
+// echoLLM отвечает на раскладку памяти пустым планом: сам по себе он
+// ничего не раскладывает. В тестах ниже память наполняется командой
+// remember — то есть руками, как это делает пользователь.
+func TestMemoryCommandsSurviveNewChat(t *testing.T) {
+	s := &Scenario{
+		Defaults: agent.Config{Tier: "weak", System: "ассистент"},
+		Variants: []Variant{
+			{Config: agent.Config{Name: "без слоёв"}},
+			{Config: agent.Config{Name: "со слоями", Memory: agent.MemoryManual, User: "саша", Task: "бот"}},
+		},
+		Dialog: []Line{
+			{Say: "бюджет 150000"},
+			{Remember: "task/бюджет = 150000"},
+			{Remember: "user/имя = Саша"},
+			{NewChat: "заказчик вернулся"},
+			{Say: "какой бюджет?", Expect: []string{"150000"}},
+		},
+	}
+	res, err := Run(t.Context(), agent.NewPool(&echoLLM{}, "echo", nil),
+		[]llm.ModelInfo{{ID: "m", Tier: "weak"}}, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Вариант без слоёв: команды remember пропущены, после обрыва разговора
+	// не осталось ничего.
+	if got := res[0].Steps[1].Command; !strings.Contains(got, "пропущено") {
+		t.Fatalf("вариант без памяти не должен запоминать: %q", got)
+	}
+	if res[0].Totals().Passed != 0 {
+		t.Fatal("без слоёв бюджет после нового разговора помнить неоткуда")
+	}
+	if len(res[0].Layers) != 0 {
+		t.Fatalf("у варианта без памяти не бывает слоёв: %+v", res[0].Layers)
+	}
+
+	// Вариант со слоями: рабочая и долговременная память пережили обрыв.
+	if res[1].Totals().Passed != 1 {
+		t.Fatalf("со слоями бюджет должен дожить: %+v", res[1].Steps[4])
+	}
+	if n := len(res[1].Layers[memory.ScopeTask]); n != 1 {
+		t.Fatalf("в рабочем слое %d записей, ожидали 1", n)
+	}
+	if n := len(res[1].Layers[memory.ScopeUser]); n != 1 {
+		t.Fatalf("в долговременном слое %d записей, ожидали 1", n)
+	}
+	// А история — нет: newchat стирает её у всех.
+	for i, r := range res {
+		if got := r.Steps[3].Brief(true); got != "↺" {
+			t.Fatalf("вариант %d: новый разговор не отмечен в отчёте: %q", i, got)
+		}
+	}
+}
+
+func TestLoadRejectsBadRemember(t *testing.T) {
+	path := t.TempDir() + "/bad.yaml"
+	if err := os.WriteFile(path, []byte(
+		"variants: [{name: a}]\ndialog:\n  - remember: \"просто строка\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "remember") {
+		t.Fatalf("сценарий с кривым remember должен отвергаться: %v", err)
+	}
+}
+
+func TestForbidCatchesWhatShouldHaveBeenForgotten(t *testing.T) {
+	// Проверка наоборот. Нужна краткосрочному слою: он обязан умереть
+	// вместе с разговором, и увидеть это можно только так.
+	l := Line{Say: "о чём мы вчера договорились?", Forbid: []string{"самозапис"}}
+	if !l.Checked() {
+		t.Fatal("строка с forbid — проверяемая")
+	}
+	if ok, _ := check("Мы это не обсуждали в этом разговоре.", l); !ok {
+		t.Fatal("правильный ответ забракован")
+	}
+	ok, missing := check("Договорились на самозапись клиента.", l)
+	if ok {
+		t.Fatal("пережившая обрыв заметка должна ловиться")
+	}
+	if len(missing) != 1 || !strings.HasPrefix(missing[0], "лишнее:") {
+		t.Fatalf("непонятно, что не так: %v", missing)
 	}
 }

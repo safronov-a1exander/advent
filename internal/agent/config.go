@@ -47,6 +47,17 @@ type Config struct {
 	Context        string `yaml:"context" json:"context,omitempty"`
 	KeepLast       *int   `yaml:"keep_last" json:"keep_last,omitempty"`
 	SummarizeEvery *int   `yaml:"summarize_every" json:"summarize_every,omitempty"`
+
+	// Модель памяти (день 11). Memory — режим: "" (слоёв нет), "manual"
+	// (слои уходят в промпт, кладёт пользователь), "auto" (плюс служебный
+	// вызов раскладки после каждой реплики).
+	//
+	// User и Task — ключи хранимых слоёв: чей долговременный слой и какой
+	// задачи рабочий. Разговоров у задачи может быть много, задач у
+	// пользователя тоже, поэтому слои привязаны не к агенту, а к ним.
+	Memory string `yaml:"memory" json:"memory,omitempty"`
+	User   string `yaml:"user" json:"user,omitempty"`
+	Task   string `yaml:"task" json:"task,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -154,6 +165,16 @@ func (c Config) Summary() string {
 	case ContextFacts:
 		parts = append(parts, fmt.Sprintf("facts + последние %d", c.keepLast()))
 	}
+	if c.Memory != "" {
+		mem := "память: " + c.Memory
+		if c.User != "" {
+			mem += " · юзер " + c.User
+		}
+		if c.Task != "" {
+			mem += " · задача " + c.Task
+		}
+		parts = append(parts, mem)
+	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
 	}
@@ -217,6 +238,15 @@ func overlay(base, top Config) Config {
 	}
 	if top.SummarizeEvery != nil {
 		out.SummarizeEvery = llm.I(*top.SummarizeEvery)
+	}
+	if top.Memory != "" {
+		out.Memory = top.Memory
+	}
+	if top.User != "" {
+		out.User = top.User
+	}
+	if top.Task != "" {
+		out.Task = top.Task
 	}
 	return out
 }
