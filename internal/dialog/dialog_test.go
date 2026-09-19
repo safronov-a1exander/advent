@@ -172,11 +172,11 @@ func TestLoadVariantWithBranches(t *testing.T) {
 }
 
 func TestCheckIgnoresCaseAndSpacesInNumbers(t *testing.T) {
-	ok, missing := check("Осталось 21 135 ₽, Саша", Line{Expect: []string{"21135", "саша"}})
+	ok, missing := check("Осталось 21 135 ₽, Саша", Check{Expect: []string{"21135", "саша"}})
 	if !ok || len(missing) != 0 {
 		t.Fatalf("проверка не прошла: %v", missing)
 	}
-	ok, missing = check("не помню", Line{Expect: []string{"10000"}})
+	ok, missing = check("не помню", Check{Expect: []string{"10000"}})
 	if ok || len(missing) != 1 {
 		t.Fatal("ложное срабатывание проверки")
 	}
@@ -247,19 +247,40 @@ func TestLoadRejectsBadRemember(t *testing.T) {
 	}
 }
 
-func TestForbidCatchesWhatShouldHaveBeenForgotten(t *testing.T) {
-	// Проверка наоборот. Нужна краткосрочному слою: он обязан умереть
-	// вместе с разговором, и увидеть это можно только так.
-	l := Line{Say: "о чём мы вчера договорились?", Forbid: []string{"самозапис"}}
+func TestForbidAndPerVariantChecks(t *testing.T) {
+	l := Line{
+		Say:    "объясни dependency injection",
+		Expect: []string{"зависимост"},
+		ExpectBy: map[string]Check{
+			"джуниор": {Expect: []string{"func "}},
+			"продакт": {Forbid: []string{"func "}},
+		},
+	}
 	if !l.Checked() {
-		t.Fatal("строка с forbid — проверяемая")
+		t.Fatal("строка с ExpectBy — проверяемая")
 	}
-	if ok, _ := check("Мы это не обсуждали в этом разговоре.", l); !ok {
-		t.Fatal("правильный ответ забракован")
+
+	// Общая проверка действует на всех, персональная дополняет.
+	jun := l.checkFor("джуниор")
+	if len(jun.Expect) != 2 || len(jun.Forbid) != 0 {
+		t.Fatalf("джуниор: %+v", jun)
 	}
-	ok, missing := check("Договорились на самозапись клиента.", l)
+	prod := l.checkFor("продакт")
+	if len(prod.Expect) != 1 || len(prod.Forbid) != 1 {
+		t.Fatalf("продакт: %+v", prod)
+	}
+	// Вариант, которого нет в ExpectBy, получает только общую.
+	if got := l.checkFor("без профиля"); len(got.Expect) != 1 || len(got.Forbid) != 0 {
+		t.Fatalf("без профиля: %+v", got)
+	}
+
+	answer := "Это про зависимости.\n\nfunc New(r Repo) *Service { … }"
+	if ok, _ := check(answer, jun); !ok {
+		t.Fatal("джуниор должен пройти: код в ответе есть")
+	}
+	ok, missing := check(answer, prod)
 	if ok {
-		t.Fatal("пережившая обрыв заметка должна ловиться")
+		t.Fatal("продакту код запрещён — проверка должна упасть")
 	}
 	if len(missing) != 1 || !strings.HasPrefix(missing[0], "лишнее:") {
 		t.Fatalf("непонятно, что не так: %v", missing)

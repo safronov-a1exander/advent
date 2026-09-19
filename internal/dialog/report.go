@@ -72,10 +72,28 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 			b.WriteString("_" + l.Note + "_\n\n")
 		}
 		if len(l.Expect) > 0 {
-			fmt.Fprintf(&b, "Ожидали в ответе: %s\n\n", "`"+strings.Join(l.Expect, "`, `")+"`")
+			fmt.Fprintf(&b, "Ожидали у всех: %s\n\n", "`"+strings.Join(l.Expect, "`, `")+"`")
 		}
 		if len(l.Forbid) > 0 {
-			fmt.Fprintf(&b, "В ответе НЕ должно быть: %s\n\n", "`"+strings.Join(l.Forbid, "`, `")+"`")
+			fmt.Fprintf(&b, "Не должно быть ни у кого: %s\n\n", "`"+strings.Join(l.Forbid, "`, `")+"`")
+		}
+		// Ожидания у профилей разные по построению: джуниору код нужен,
+		// продакту запрещён. Поэтому персональные проверки печатаются рядом,
+		// иначе по отчёту непонятно, почему один вариант «прошёл», а другой
+		// с тем же ответом — нет.
+		for _, r := range res {
+			own, ok := l.ExpectBy[r.Variant.Name]
+			if !ok || own.Empty() {
+				continue
+			}
+			fmt.Fprintf(&b, "Отдельно у «%s»:", r.Variant.Name)
+			if len(own.Expect) > 0 {
+				fmt.Fprintf(&b, " ждём %s", "`"+strings.Join(own.Expect, "`, `")+"`")
+			}
+			if len(own.Forbid) > 0 {
+				fmt.Fprintf(&b, " · не должно быть %s", "`"+strings.Join(own.Forbid, "`, `")+"`")
+			}
+			b.WriteString("\n\n")
 		}
 		for _, r := range res {
 			if i >= len(r.Steps) {
@@ -191,6 +209,9 @@ func VariantLabel(r Result) string {
 	}
 	if c.Memory != "" {
 		label += " + " + agent.MemoryLabel(c.Memory)
+	}
+	if c.Profile != "" {
+		label += " + профиль " + c.Profile
 	}
 	return label
 }

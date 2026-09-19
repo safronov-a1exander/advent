@@ -41,6 +41,7 @@ func usage() {
   sessions  сохранённые разговоры агентов                   (день 7)
   dialog    один диалог в нескольких стратегиях контекста   (день 9)
   memory    слои памяти агента: рабочая и долговременная      (день 11)
+  profile   профили пользователей: стиль, ограничения, дороги  (день 12)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -81,6 +82,8 @@ func run() error {
 		return cmdDialog(ctx, args)
 	case "memory":
 		return cmdMemory(ctx, args)
+	case "profile":
+		return cmdProfile(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

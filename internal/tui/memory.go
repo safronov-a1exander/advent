@@ -113,6 +113,14 @@ func (m *Model) memoryCommand(text string) bool {
 	head = strings.ToLower(strings.TrimSpace(head))
 	rest = strings.TrimSpace(rest)
 
+	// День 12: профиль переключается той же строкой, что и память
+	// кладётся, — из поля ввода. Иначе смена профиля означала бы поход
+	// в панель и десяток нажатий вниз, а менять его хочется часто:
+	// вся суть персонализации видна только в сравнении.
+	if head == "profile" {
+		m.profileCommand(rest)
+		return true
+	}
 	if head == "forget" {
 		scope, key, _ := strings.Cut(rest, " ")
 		m.forgetCommand(memory.Scope(strings.ToLower(strings.TrimSpace(scope))), strings.TrimSpace(key))
@@ -140,6 +148,34 @@ func (m *Model) memoryCommand(text string) bool {
 	m.pushLine(stNote.Render(fmt.Sprintf("🧠 %s · %s: %s", scope.Label(), key, value)))
 	m.refresh()
 	return true
+}
+
+// profileCommand переключает профиль. Пустой аргумент снимает профиль —
+// так в демо показывают «а вот как то же самое без персонализации».
+func (m *Model) profileCommand(id string) {
+	id = strings.TrimSpace(id)
+	m.set.Profile = id
+	cfg := m.set.AgentConfig()
+	m.ag.SetConfig(cfg)
+
+	prof := m.ag.Profile()
+	switch {
+	case id == "":
+		m.pushLine("")
+		m.pushLine(stNote.Render("👤 профиль снят — дальше без персонализации"))
+	case prof == nil:
+		// Конфиг мы уже поменяли: агент честно останется без профиля,
+		// и об этом надо сказать, а не делать вид, что всё хорошо.
+		m.flash = "профиль «" + id + "» не прочитался — работаем без него"
+		return
+	default:
+		m.pushLine("")
+		m.pushLine(stNote.Render("👤 профиль: " + prof.Summary()))
+		if pl, ok := prof.Default(); ok && len(pl.Stages) > 0 {
+			m.pushLine(stDim.Render("   дорога по умолчанию «" + pl.Name + "»: " + strings.Join(pl.Stages, " → ")))
+		}
+	}
+	m.refresh()
 }
 
 func (m *Model) forgetCommand(scope memory.Scope, key string) {

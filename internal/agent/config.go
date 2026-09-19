@@ -58,6 +58,9 @@ type Config struct {
 	Memory string `yaml:"memory" json:"memory,omitempty"`
 	User   string `yaml:"user" json:"user,omitempty"`
 	Task   string `yaml:"task" json:"task,omitempty"`
+	// Profile — id профиля пользователя (день 12): profiles/<id>.yaml.
+	// Пусто — без профиля, агент работает как на одиннадцатом дне.
+	Profile string `yaml:"profile" json:"profile,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -165,6 +168,9 @@ func (c Config) Summary() string {
 	case ContextFacts:
 		parts = append(parts, fmt.Sprintf("facts + последние %d", c.keepLast()))
 	}
+	if c.Profile != "" {
+		parts = append(parts, "профиль: "+c.Profile)
+	}
 	if c.Memory != "" {
 		mem := "память: " + c.Memory
 		if c.User != "" {
@@ -238,6 +244,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.SummarizeEvery != nil {
 		out.SummarizeEvery = llm.I(*top.SummarizeEvery)
+	}
+	if top.Profile != "" {
+		out.Profile = top.Profile
 	}
 	if top.Memory != "" {
 		out.Memory = top.Memory

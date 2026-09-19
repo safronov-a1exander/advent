@@ -71,14 +71,41 @@ type Line struct {
 	// Expect — подстроки, которые обязаны быть в ответе (без учёта регистра).
 	// Реплики с проверками — это вопросы на память о раннем разговоре.
 	Expect []string `yaml:"expect"`
-	// Forbid — подстроки, которых в ответе быть не должно.
-	//
-	// Нужен ровно там, где проверяется краткосрочный слой: он обязан
-	// умереть вместе с разговором, и увидеть это можно только проверкой
-	// наоборот — «этого агент помнить уже не должен».
+	// Forbid — подстроки, которых в ответе быть не должно (день 12).
+	// Половина персонализации — это запреты: «никакого кода», «без
+	// предисловий», — и проверить их можно только так.
 	Forbid []string `yaml:"forbid"`
+	// ExpectBy — проверки для конкретных вариантов по их имени (день 12).
+	// У профилей ожидания разные по построению: джуниору код нужен,
+	// продакту запрещён, и общей проверкой это не выразить.
+	ExpectBy map[string]Check `yaml:"expect_by"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
+}
+
+// Check — что должно и чего не должно быть в ответе.
+type Check struct {
+	Expect []string `yaml:"expect"`
+	Forbid []string `yaml:"forbid"`
+}
+
+// Empty — проверять нечего.
+func (c Check) Empty() bool { return len(c.Expect) == 0 && len(c.Forbid) == 0 }
+
+// checkFor — проверка этой строки для варианта с таким именем: общая
+// плюс персональная. Общая действует на всех, персональная дополняет.
+func (l Line) checkFor(variant string) Check {
+	c := Check{Expect: append([]string(nil), l.Expect...), Forbid: append([]string(nil), l.Forbid...)}
+	if own, ok := l.ExpectBy[variant]; ok {
+		c.Expect = append(c.Expect, own.Expect...)
+		c.Forbid = append(c.Forbid, own.Forbid...)
+	}
+	return c
+}
+
+// Checked — есть ли у строки проверки хоть для кого-нибудь.
+func (l Line) Checked() bool {
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0
 }
 
 // Load читает сценарий.
@@ -117,9 +144,6 @@ func Load(path string) (*Scenario, error) {
 	}
 	return &s, nil
 }
-
-// Checked — есть ли у строки проверки.
-func (l Line) Checked() bool { return len(l.Expect) > 0 || len(l.Forbid) > 0 }
 
 // Command — команда веток строки или пусто, если это реплика.
 func (l Line) Command() string {
@@ -264,7 +288,8 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		}
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
-		st := Step{Say: l.Say, Checked: l.Checked(), Branch: a.ActiveBranch()}
+		want := l.checkFor(cfg.Name)
+		st := Step{Say: l.Say, Checked: !want.Empty(), Branch: a.ActiveBranch()}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -276,7 +301,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			st.Turn = turns[len(turns)-1]
 		}
 		if st.Checked {
-			st.Passed, st.Missing = check(st.Answer, l)
+			st.Passed, st.Missing = check(st.Answer, want)
 		}
 		res.Steps = append(res.Steps, st)
 	}
@@ -345,9 +370,10 @@ func (l Line) Text() string {
 	return strings.Join(strings.Fields(l.Say), " ")
 }
 
-// check — все ли ожидаемые подстроки есть в ответе. Регистр и неразрывные
-// пробелы в числах не важны: «21 135» и «21135» — один и тот же ответ.
-func check(answer string, l Line) (bool, []string) {
+// check — все ли ожидаемые подстроки есть в ответе и нет ли запрещённых.
+// Регистр и неразрывные пробелы в числах не важны: «21 135» и «21135» —
+// один и тот же ответ.
+func check(answer string, want Check) (bool, []string) {
 	norm := func(s string) string {
 		s = strings.ToLower(s)
 		for _, sp := range []string{" ", " ", " "} {
@@ -357,14 +383,16 @@ func check(answer string, l Line) (bool, []string) {
 	}
 	a := norm(answer)
 	var missing []string
-	for _, e := range l.Expect {
+	for _, e := range want.Expect {
 		if !strings.Contains(a, norm(e)) {
 			missing = append(missing, e)
 		}
 	}
-	// Запрет проверяется так же буквально, как ожидание: годится
-	// для «этого в ответе быть не должно», а не для тонких различий.
-	for _, f := range l.Forbid {
+	// Запреты проверяются так же буквально, как ожидания. Этого мало,
+	// чтобы поймать «никакого кода» вообще, но достаточно, чтобы поймать
+	// конкретные признаки — и разница между профилями становится фактом,
+	// а не впечатлением от чтения ответов.
+	for _, f := range want.Forbid {
 		if strings.Contains(a, norm(f)) {
 			missing = append(missing, "лишнее: "+f)
 		}

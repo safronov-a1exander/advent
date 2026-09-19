@@ -12,6 +12,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/profile"
 )
 
 // Pool порождает агентов и держит их в одном процессе.
@@ -38,6 +39,56 @@ type Pool struct {
 	// слои принадлежат задаче и пользователю, а не агенту, и два разговора
 	// об одной задаче должны видеть одну и ту же рабочую память.
 	memStore memory.Store
+
+	// profStore — откуда брать профили пользователей (день 12).
+	profStore profile.Store
+	// catalog — модели провайдера с классами; дорога профиля выбирает
+	// по нему модель под класс.
+	catalog []ModelTier
+}
+
+// SetProfileStore включает профили: агент с непустым Config.Profile
+// поднимет его отсюда.
+func (p *Pool) SetProfileStore(s profile.Store) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.profStore = s
+}
+
+// SetCatalog запоминает модели провайдера с классами. Нужен дорогам
+// профиля, которые просят класс, а не имя модели.
+func (p *Pool) SetCatalog(c []ModelTier) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.catalog = append([]ModelTier(nil), c...)
+}
+
+// loadProfile поднимает профиль по id; пустой id — без профиля.
+func (p *Pool) loadProfile(id string) (*profile.Profile, error) {
+	p.mu.Lock()
+	st := p.profStore
+	p.mu.Unlock()
+	if st == nil || strings.TrimSpace(id) == "" {
+		return nil, nil
+	}
+	return st.Load(id)
+}
+
+// wireProfile поднимает профиль агента; вызывать под p.mu.
+func (p *Pool) wireProfile(a *Agent, cfg Config) {
+	a.newProf = p.loadProfile
+	a.catalog = append([]ModelTier(nil), p.catalog...)
+	if p.profStore == nil || strings.TrimSpace(cfg.Profile) == "" {
+		return
+	}
+	prof, err := p.profStore.Load(cfg.Profile)
+	if err != nil {
+		// Профиль не прочитался — агент работает без него. Молча
+		// персонализировать «как получится» хуже, чем сказать об этом.
+		p.saveErr = fmt.Errorf("профиль %q не прочитался: %w", cfg.Profile, err)
+		return
+	}
+	a.prof = prof
 }
 
 // SetMemoryStore включает слои памяти: у каждого агента с непустым режимом
@@ -169,6 +220,7 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 		cfg:      cfg.Clone(),
 		temp:     temp,
 	}
+	p.wireProfile(a, cfg)
 	a.newMem = p.newMemory
 	a.mem, err = newMemory(p.memStore, cfg)
 	if err != nil {
@@ -236,6 +288,7 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			updated:  snap.Updated,
 			rev:      snap.Rev,
 		}
+		p.wireProfile(a, snap.Config)
 		a.newMem = p.newMemory
 		mem, memErr := newMemory(p.memStore, snap.Config)
 		if memErr != nil {
