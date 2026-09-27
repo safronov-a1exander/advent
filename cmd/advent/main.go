@@ -44,6 +44,7 @@ func usage() {
   profile   профили пользователей: стиль, ограничения, дороги  (день 12)
   task      состояние задачи: стадия, шаг, план               (день 13)
   invariants ограничения, которые нельзя нарушать            (день 14)
+  mcp       подключиться к MCP-серверам и показать инструменты (день 16)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -90,6 +91,8 @@ func run() error {
 		return cmdTask(ctx, args)
 	case "invariants":
 		return cmdInvariants(ctx, args)
+	case "mcp":
+		return cmdMCP(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":
