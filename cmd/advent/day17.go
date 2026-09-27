@@ -50,7 +50,14 @@ func callTool(ctx context.Context, cl *mcp.Client, tool, args string) error {
 		args = "{}"
 	}
 	if !json.Valid([]byte(args)) {
-		return fmt.Errorf("-args не JSON: %s", args)
+		// PowerShell 5.1 срезает кавычки у аргументов внешних программ,
+		// и JSON доезжает до нас как {amount:10,from:USD}. Поэтому кроме
+		// JSON понимаем и простую запись: amount=10,from=USD.
+		kv, err := parseKV(args)
+		if err != nil {
+			return fmt.Errorf("-args: ни JSON, ни ключ=значение: %s", args)
+		}
+		args = kv
 	}
 	res, err := cl.CallTool(ctx, tool, json.RawMessage(args))
 	if err != nil {
@@ -68,6 +75,31 @@ func callTool(ctx context.Context, cl *mcp.Client, tool, args string) error {
 		fmt.Printf("     structuredContent: %s\n", res.StructuredContent)
 	}
 	return nil
+}
+
+// parseKV — «amount=10,from=USD» или «amount=10 from=USD» в JSON-объект.
+// Числа и true/false становятся числами и булевыми, остальное — строками.
+func parseKV(s string) (string, error) {
+	s = strings.Trim(strings.TrimSpace(s), "{}")
+	obj := map[string]any{}
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			k, v, ok = strings.Cut(part, ":")
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if !ok || k == "" {
+			return "", fmt.Errorf("не пара ключ=значение: %q", part)
+		}
+		var x any
+		if json.Unmarshal([]byte(v), &x) == nil {
+			obj[k] = x
+		} else {
+			obj[k] = v
+		}
+	}
+	b, err := json.Marshal(obj)
+	return string(b), err
 }
 
 func splitList(s string) []string {

@@ -420,7 +420,7 @@ func (st Step) Brief(sent bool) string {
 		c += fmt.Sprintf(" ⛔%d", st.Violations)
 	}
 	if len(st.Tools) > 0 {
-		c += " ⚙ " + agent.ToolTrace(st.Tools)
+		c += " ▸ " + agent.ToolTrace(st.Tools)
 	}
 	if st.Checked {
 		if st.Passed {

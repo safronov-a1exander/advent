@@ -177,7 +177,7 @@ go run ./cmd/advent dialog -scenario scenarios/day17-first-tool.yaml
 Remove-Item -Recurse -Force runs\sessions-day17 -ErrorAction SilentlyContinue
 $t = 'advent · день 17 — первый инструмент MCP'
 .\scripts\demo.ps1 -Name day17 -MaxSeconds 1800 -AppArgsList @(
-  @('mcp','-server','rates','-wire','-call','convert','-args','{"amount":10,"from":"USD"}','-hold','12s'),
+  @('mcp','-server','rates','-wire','-call','convert','-args','amount=10,from=USD','-hold','12s'),
   @('demo','-script','scripts/day17.demo','-mcp','rates','-thinking','disabled','-sessions','runs/sessions-day17','-new','-title',$t),
   @('dialog','-scenario','scenarios/day17-first-tool.yaml','-hold','30s'))
 ```
