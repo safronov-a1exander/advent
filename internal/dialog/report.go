@@ -81,6 +81,12 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 		if len(l.Tools) > 0 {
 			fmt.Fprintf(&b, "Инструменты по порядку: %s\n\n", "`"+strings.Join(l.Tools, "` → `")+"`")
 		}
+		for _, ch := range l.Chains {
+			fmt.Fprintf(&b, "Цепочка: %s\n\n", "`"+strings.Join(ch, "` → `")+"`")
+		}
+		for _, p := range l.Passes {
+			fmt.Fprintf(&b, "Стык: результат `%s` → аргументы `%s`\n\n", p.From, p.To)
+		}
 		if l.NoTools {
 			b.WriteString("Инструменты звать незачем.\n\n")
 		}

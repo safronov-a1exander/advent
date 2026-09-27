@@ -327,3 +327,22 @@ func TestUsesResult(t *testing.T) {
 		t.Error("без инструментов опираться не на что")
 	}
 }
+
+func TestCheckPass(t *testing.T) {
+	q := "Нужно 60 000 лир к 2027-03-01"
+	conv := mcp.Outcome{Server: "rates", Tool: "convert", Text: "60000 TRY = 103674.21 RUB по курсу ЦБ на 26.09.2026"}
+	good := mcp.Outcome{Server: "goals", Tool: "add_goal", Args: `{"name":"Стамбул","amount_rub":103674.21,"deadline":"2027-03-01"}`}
+	bad := mcp.Outcome{Server: "goals", Tool: "add_goal", Args: `{"name":"Стамбул","amount_rub":60000,"deadline":"2027-03-01"}`}
+	p := Pass{From: "rates.convert", To: "goals.add_goal"}
+	if m := checkPass(q, []mcp.Outcome{conv, good}, p); m != "" {
+		t.Fatalf("честный стык: %s", m)
+	}
+	// Модель положила в цель лиры вместо рублей: 60000 есть и в вопросе,
+	// и в результате, но это не рубли из курса.
+	if m := checkPass(q, []mcp.Outcome{conv, bad}, p); m == "" {
+		t.Fatal("лиры вместо рублей должны не проходить")
+	}
+	if m := checkPass(q, []mcp.Outcome{good}, p); m == "" {
+		t.Fatal("без convert стыка нет")
+	}
+}
