@@ -86,7 +86,9 @@ type Line struct {
 	// продакту запрещён, и общей проверкой это не выразить.
 	ExpectBy map[string]Check `yaml:"expect_by"`
 	// Tools — какие инструменты агент обязан вызвать на этой реплике и
-	// в каком порядке: «rates.convert» (день 17). Между ними могут быть
+	// в каком порядке: «rates.convert» (день 17). Без сервера —
+	// «convert» — подходит инструмент с таким именем на любом сервере:
+	// так один сценарий гоняют на двух конфигурациях одного сервера. Между ними могут быть
 	// другие вызовы — проверяется порядок, а не точное совпадение.
 	// Проверка варианта без MCP — это его смысл: он её не проходит.
 	Tools []string `yaml:"tools"`
@@ -99,6 +101,12 @@ type Line struct {
 	// «Получите и используйте результат» из задания дня 17 — ровно это:
 	// вызвать инструмент и ответить своими словами — не одно и то же.
 	UsesResult bool `yaml:"uses_result"`
+	// ToolExpect — что должно быть в результате инструмента (день 19):
+	// «budget.summarize_transactions: совпали все». Проверяется последний
+	// вызов этого инструмента на реплике. Так проверяется не ответ модели,
+	// а то, что она передала между инструментами: сервер сам сверяет вход
+	// со своей выдачей и пишет итог сверки в результат.
+	ToolExpect map[string]string `yaml:"tool_expect"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -125,7 +133,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0
 }
 
 // Load читает сценарий.
@@ -332,7 +340,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult, Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0, Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -350,6 +358,12 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			if miss := checkTools(st.Tools, l.Tools, l.NoTools); len(miss) > 0 {
 				st.Passed = false
 				st.Missing = append(st.Missing, miss...)
+			}
+			for tool, want := range l.ToolExpect {
+				if miss := checkToolResult(st.Tools, tool, want); miss != "" {
+					st.Passed = false
+					st.Missing = append(st.Missing, miss)
+				}
 			}
 			if l.UsesResult && !usesResult(l.Say, st.Answer, st.Tools) {
 				st.Passed = false
@@ -487,7 +501,7 @@ func checkTools(got []mcp.Outcome, want []string, none bool) []string {
 	for _, w := range want {
 		found := false
 		for ; i < len(got); i++ {
-			if !got[i].IsError && got[i].Server+"."+got[i].Tool == w {
+			if !got[i].IsError && toolIs(got[i], w) {
 				found, i = true, i+1
 				break
 			}

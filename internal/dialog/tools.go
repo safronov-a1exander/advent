@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -54,4 +55,28 @@ func usesResult(question, answer string, tools []mcp.Outcome) bool {
 		}
 	}
 	return false
+}
+
+// checkToolResult — есть ли want в результате последнего вызова tool.
+// Пусто — всё хорошо, иначе — что не так.
+func checkToolResult(got []mcp.Outcome, tool, want string) string {
+	for i := len(got) - 1; i >= 0; i-- {
+		o := got[i]
+		if !toolIs(o, tool) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(o.Text), strings.ToLower(want)) {
+			return ""
+		}
+		return fmt.Sprintf("в результате %s нет «%s»", tool, want)
+	}
+	return "не вызван: " + tool
+}
+
+// toolIs — тот ли это вызов: «сервер.инструмент» или просто «инструмент».
+func toolIs(o mcp.Outcome, name string) bool {
+	if strings.Contains(name, ".") {
+		return o.Server+"."+o.Tool == name
+	}
+	return o.Tool == name
 }

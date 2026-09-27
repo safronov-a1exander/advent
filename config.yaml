@@ -120,7 +120,19 @@ mcp_servers:
     command: "@self"
     args: [mcp-server, rates]
     description: курсы валют ЦБ РФ — свой сервер стенда вокруг API ЦБ
-  # Тот же сервер, но отдельным процессом по HTTP (день 18): ему нужно
+  # Выписка по карте: поиск, сводка, сохранение отчёта (день 19).
+  # Данные от search к summarize идут по ссылке — dataset_id.
+  - name: budget
+    command: "@self"
+    args: [mcp-server, budget]
+    description: выписка по карте — поиск, сводка, отчёт в файл
+  # Тот же сервер, но операции идут к summarize целиком, через модель.
+  # Нужен для сравнения: какой способ передачи данных надёжнее.
+  - name: budget-byvalue
+    command: "@self"
+    args: [mcp-server, budget, -handoff, value]
+    description: то же, но модель переписывает операции из search в summarize сама
+  # Тот же сервер курсов, но отдельным процессом по HTTP (день 18): ему нужно
   # жить и делать замеры, когда к нему никто не подключён. Запуск:
   #   advent mcp-server rates -http 127.0.0.1:8765
   - name: rates-live
