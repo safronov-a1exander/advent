@@ -92,6 +92,17 @@ type Line struct {
 	// другие вызовы — проверяется порядок, а не точное совпадение.
 	// Проверка варианта без MCP — это его смысл: он её не проходит.
 	Tools []string `yaml:"tools"`
+	// Chains — несколько цепочек, каждая проверяется как Tools (день 20).
+	// Нужны, когда у флоу несколько независимых веток: «курс → цель» и
+	// «выписка → сводка → план» могут идти в любом порядке между собой,
+	// но внутри каждой порядок обязателен.
+	Chains [][]string `yaml:"chains"`
+	// Passes — данные между инструментами разных серверов (день 20):
+	// число из результата From должно оказаться в аргументах To. Сервер
+	// «Цели» не может проверить, что сумма в рублях пришла из «Курсов», —
+	// они ничего друг о друге не знают. Проверить стык может только тот,
+	// кто видит оба вызова.
+	Passes []Pass `yaml:"passes"`
 	// NoTools — на этой реплике инструменты звать незачем. Лишний вызов —
 	// это деньги и задержка, и модель, которая зовёт курс на «привет»,
 	// так же неправа, как модель, которая курс придумывает.
@@ -109,6 +120,12 @@ type Line struct {
 	ToolExpect map[string]string `yaml:"tool_expect"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
+}
+
+// Pass — стык двух инструментов: результат From → аргументы To.
+type Pass struct {
+	From string `yaml:"from"`
+	To   string `yaml:"to"`
 }
 
 // Check — что должно и чего не должно быть в ответе.
@@ -133,7 +150,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0
 }
 
 // Load читает сценарий.
@@ -340,7 +357,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0, Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0, Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -358,6 +375,18 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 			if miss := checkTools(st.Tools, l.Tools, l.NoTools); len(miss) > 0 {
 				st.Passed = false
 				st.Missing = append(st.Missing, miss...)
+			}
+			for _, ch := range l.Chains {
+				if miss := checkTools(st.Tools, ch, false); len(miss) > 0 {
+					st.Passed = false
+					st.Missing = append(st.Missing, miss...)
+				}
+			}
+			for _, p := range l.Passes {
+				if miss := checkPass(l.Say, st.Tools, p); miss != "" {
+					st.Passed = false
+					st.Missing = append(st.Missing, miss)
+				}
 			}
 			for tool, want := range l.ToolExpect {
 				if miss := checkToolResult(st.Tools, tool, want); miss != "" {

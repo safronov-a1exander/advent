@@ -51,6 +51,10 @@ type rule struct {
 	// tool_calls), например по вызову на каждую валюту. Если задано,
 	// args не используется.
 	many func(q string, results []string) []map[string]any
+	// after — инструменты, которые должны быть вызваны раньше, если они
+	// есть в запросе (день 20): цель заводят после пересчёта валюты,
+	// отчёт сохраняют после плана.
+	after []string
 }
 
 var (
@@ -104,7 +108,14 @@ func currencyOf(q string) string {
 	return ""
 }
 
+// amountRe — сумма прямо перед названием валюты: «60 000 турецких лир».
+var amountRe = regexp.MustCompile(`(\d[\d ]*)\s*(?:турецк\S*\s+)?(?:лир|доллар|евро|юан|руб|usd|eur|try)`)
+
 func firstNumber(q string) (float64, bool) {
+	if m := amountRe.FindStringSubmatch(strings.ToLower(q)); m != nil {
+		v, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(m[1]), " ", ""), 64)
+		return v, err == nil
+	}
 	m := numRe.FindString(strings.ReplaceAll(q, " ", ""))
 	if m == "" {
 		return 0, false
@@ -119,14 +130,16 @@ var rules = []rule{
 		tool: "search_transactions",
 		when: func(q string, _ []string) bool {
 			l := strings.ToLower(q)
-			return strings.Contains(l, "трат") || strings.Contains(l, "операц") || strings.Contains(l, "найди") || strings.Contains(l, "покупк")
+			return strings.Contains(l, "трат") || strings.Contains(l, "операц") || strings.Contains(l, "найди") ||
+				strings.Contains(l, "покупк") || strings.Contains(l, "выписк")
 		},
 		args: func(q string, _ []string) map[string]any {
 			l := strings.ToLower(q)
-			for word, cat := range map[string]string{"кафе": "кафе", "такси": "транспорт", "транспорт": "транспорт",
-				"продукт": "продукты", "покупк": "покупки", "здоров": "здоровье", "подписк": "подписки"} {
-				if strings.Contains(l, word) {
-					return map[string]any{"category": cat}
+			for _, wc := range [][2]string{{"накопит", "перевод"}, {"перевод", "перевод"}, {"кафе", "кафе"},
+				{"такси", "транспорт"}, {"транспорт", "транспорт"}, {"продукт", "продукты"}, {"покупк", "покупки"},
+				{"здоров", "здоровье"}, {"подписк", "подписки"}} {
+				if strings.Contains(l, wc[0]) {
+					return map[string]any{"category": wc[1]}
 				}
 			}
 			if strings.Contains(l, "яндекс") {
@@ -153,13 +166,60 @@ var rules = []rule{
 		},
 	},
 	{
-		tool: "save_report",
+		tool:  "save_report",
+		after: []string{"plan_goal"},
 		when: func(q string, results []string) bool {
-			return strings.Contains(strings.ToLower(q), "сохрани") && lastWith(results, "Сводка sum-") != ""
+			l := strings.ToLower(q)
+			wants := strings.Contains(l, "сохрани") || strings.Contains(l, "в отчёт")
+			return wants && (lastWith(results, "Сводка sum-") != "" || lastWith(results, "осталось накопить") != "")
 		},
 		args: func(q string, results []string) map[string]any {
-			return map[string]any{"title": "Отчёт по тратам", "content": lastWith(results, "Сводка sum-")}
+			content := lastWith(results, "Сводка sum-")
+			if p := lastWith(results, "осталось накопить"); p != "" {
+				content += "\n\n" + p
+			}
+			return map[string]any{"title": "Отчёт по тратам", "content": content}
 		},
+	},
+	// День 20: цели — после пересчёта валюты и сводки по выписке.
+	{
+		tool:  "add_goal",
+		after: []string{"convert"},
+		when: func(q string, results []string) bool {
+			return strings.Contains(strings.ToLower(q), "цель")
+		},
+		args: func(q string, results []string) map[string]any {
+			rub := 0.0
+			if m := regexp.MustCompile(`= ([\d.]+) RUB`).FindStringSubmatch(lastWith(results, " RUB по курсу")); m != nil {
+				rub, _ = strconv.ParseFloat(m[1], 64)
+			}
+			return map[string]any{"name": goalName(q), "amount_rub": rub, "deadline": russianDate(q)}
+		},
+	},
+	{
+		tool:  "plan_goal",
+		after: []string{"add_goal", "summarize_transactions"},
+		when: func(q string, results []string) bool {
+			l := strings.ToLower(q)
+			return strings.Contains(l, "успева") || strings.Contains(l, "в месяц")
+		},
+		args: func(q string, results []string) map[string]any {
+			monthly := 0.0
+			if m := regexp.MustCompile(`по ([\d ]+) в месяц`).FindStringSubmatch(q); m != nil {
+				monthly, _ = strconv.ParseFloat(strings.ReplaceAll(m[1], " ", ""), 64)
+			} else if m := regexp.MustCompile(`итого ([\d.]+) RUB`).FindStringSubmatch(lastWith(results, "Сводка sum-")); m != nil {
+				monthly, _ = strconv.ParseFloat(m[1], 64)
+			}
+			return map[string]any{"name": goalName(q), "monthly_rub": monthly}
+		},
+	},
+	{
+		tool: "list_goals",
+		when: func(q string, _ []string) bool {
+			l := strings.ToLower(q)
+			return strings.Contains(l, "какие") && strings.Contains(l, "цели")
+		},
+		args: func(string, []string) map[string]any { return map[string]any{} },
 	},
 	{
 		tool: "watch_rate",
@@ -243,6 +303,11 @@ func mockTools(req chatReq) (calls []toolCall, text string, ok bool) {
 		return nil, "", false
 	}
 	q := req.Messages[u].Content
+	var all []string
+	for _, m := range req.Messages {
+		all = append(all, m.Content)
+	}
+	dialogText = strings.Join(all, "\n")
 	called := map[string]bool{}
 	var results []string
 	for _, m := range req.Messages[u+1:] {
@@ -255,7 +320,7 @@ func mockTools(req chatReq) (calls []toolCall, text string, ok bool) {
 	}
 	for _, r := range rules {
 		fn := findTool(req.Tools, r.tool)
-		if fn == "" || called[fn] || !r.when(q, results) {
+		if fn == "" || called[fn] || !r.when(q, results) || !ready(req.Tools, called, r.after, q, results) {
 			continue
 		}
 		var list []map[string]any
@@ -352,4 +417,52 @@ func lastWith(results []string, sub string) string {
 		}
 	}
 	return ""
+}
+
+// goalName — название цели из вопроса, а если там его нет — из всего
+// разговора: «а если по 25 000 в месяц?» говорит о цели, названной раньше.
+func goalName(q string) string {
+	for _, text := range []string{q, dialogText} {
+		for _, w := range []string{"Стамбул", "отпуск", "ноутбук"} {
+			if strings.Contains(text, w) {
+				return w
+			}
+		}
+	}
+	return "Цель"
+}
+
+// dialogText — весь текст текущего запроса; его ставит mockTools.
+// Заглушка обслуживает запросы по одному, так что гонки тут нет только
+// в репетициях с одним агентом; для правил, которым это важно, хватит.
+var dialogText string
+
+var months = map[string]string{"января": "01", "февраля": "02", "марта": "03", "апреля": "04", "мая": "05", "июня": "06",
+	"июля": "07", "августа": "08", "сентября": "09", "октября": "10", "ноября": "11", "декабря": "12"}
+
+// russianDate — «1 марта 2027» → 2027-03-01.
+func russianDate(q string) string {
+	m := regexp.MustCompile(`(\d{1,2}) (\p{L}+) (\d{4})`).FindStringSubmatch(strings.ToLower(q))
+	if m == nil || months[m[2]] == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s-%02s", m[3], months[m[2]], m[1])
+}
+
+// ready — вызваны ли уже инструменты, которые должны идти раньше.
+// Предшественник обязателен, только если он сам уместен на этом вопросе:
+// «а если по 25 000 в месяц?» план пересчитывает, а цель заново не заводит.
+func ready(tools []toolDef, called map[string]bool, after []string, q string, results []string) bool {
+	for _, a := range after {
+		fn := findTool(tools, a)
+		if fn == "" || called[fn] {
+			continue
+		}
+		for _, r := range rules {
+			if r.tool == a && r.when(q, results) {
+				return false
+			}
+		}
+	}
+	return true
 }

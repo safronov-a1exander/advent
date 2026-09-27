@@ -19,6 +19,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/servers/budget"
+	"github.com/safronov-a1exander/advent/internal/servers/goals"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
 )
 
@@ -33,6 +34,7 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 	statement := fs.String("statement", "data/statement.txt", "budget: файл выписки (день 19)")
 	year := fs.Int("year", 2026, "budget: год операций — в выписке его нет")
 	reportsDir := fs.String("reports", "reports/budget", "budget: куда save_report кладёт отчёты")
+	goalsData := fs.String("goals", "runs/mcp/goals.json", "goals: файл целей (день 20)")
 	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
 	// Имя сервера — первый аргумент, флаги можно писать и после него.
 	name := ""
@@ -69,8 +71,14 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 			return err
 		}
 		srv = budget.New(txs, budget.Options{Handoff: budget.Handoff(*handoff), ReportsDir: *reportsDir})
+	case "goals":
+		g, err := goals.New(*goalsData, nil)
+		if err != nil {
+			return err
+		}
+		srv = g
 	default:
-		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget", name)
+		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.

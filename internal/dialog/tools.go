@@ -80,3 +80,41 @@ func toolIs(o mcp.Outcome, name string) bool {
 	}
 	return o.Tool == name
 }
+
+// checkPass — дошло ли число из результата p.From до аргументов p.To.
+// Числа из вопроса не считаются: их модель могла взять оттуда, не глядя
+// на результат. Пусто — стык в порядке.
+func checkPass(question string, got []mcp.Outcome, p Pass) string {
+	asked := numbers(question)
+	var from, to []mcp.Outcome
+	for _, o := range got {
+		if o.IsError {
+			continue
+		}
+		if toolIs(o, p.From) {
+			from = append(from, o)
+		}
+		if toolIs(o, p.To) {
+			to = append(to, o)
+		}
+	}
+	switch {
+	case len(from) == 0:
+		return "стык " + p.From + " → " + p.To + ": не вызван " + p.From
+	case len(to) == 0:
+		return "стык " + p.From + " → " + p.To + ": не вызван " + p.To
+	}
+	for _, f := range from {
+		for n := range numbers(f.Text) {
+			if asked[n] {
+				continue
+			}
+			for _, t := range to {
+				if numbers(t.Args)[n] {
+					return ""
+				}
+			}
+		}
+	}
+	return "стык " + p.From + " → " + p.To + ": в аргументах нет чисел из результата"
+}
