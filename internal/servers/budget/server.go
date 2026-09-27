@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -363,14 +364,36 @@ func (st *state) save(_ context.Context, raw json.RawMessage) mcp.CallResult {
 	if slug == "" {
 		slug = "report"
 	}
-	name := fmt.Sprintf("%s-%s.md", slug, st.opts.Now().Format("20060102-150405"))
-	path := filepath.Join(st.opts.ReportsDir, name)
+	stamp := slug + "-" + st.opts.Now().Format("20060102-150405")
 	body := "# " + title + "\n\n" + strings.TrimSpace(a.Content) + "\n"
 	if err := os.MkdirAll(st.opts.ReportsDir, 0o755); err != nil {
 		return mcp.ErrorResult("не создать каталог отчётов: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return mcp.ErrorResult("не записать отчёт: %v", err)
+	// Файл создаётся только новым (O_EXCL): два отчёта с одним заголовком
+	// в одну секунду — обычное дело, когда сервером пользуются двое, и
+	// второй не должен молча затереть первый.
+	var path string
+	for n := 1; ; n++ {
+		name := stamp + ".md"
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d.md", stamp, n)
+		}
+		path = filepath.Join(st.opts.ReportsDir, name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if errors.Is(err, os.ErrExist) && n < 100 {
+			continue
+		}
+		if err != nil {
+			return mcp.ErrorResult("не записать отчёт: %v", err)
+		}
+		_, err = f.WriteString(body)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return mcp.ErrorResult("не записать отчёт: %v", err)
+		}
+		break
 	}
 	sum := sha256.Sum256([]byte(body))
 	check := st.reportCheck(a.Content)

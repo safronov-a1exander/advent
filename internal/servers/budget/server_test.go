@@ -135,3 +135,19 @@ func TestSummaryKeepsForeignApart(t *testing.T) {
 		t.Fatalf("валюта: %+v", s)
 	}
 }
+
+// Два отчёта с одним заголовком в одну секунду не затирают друг друга.
+func TestSaveDoesNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC) }
+	cl := connect(t, New(statement(t), Options{ReportsDir: dir, Now: now}))
+	call(t, cl, "save_report", map[string]string{"title": "План", "content": "первый"})
+	res := call(t, cl, "save_report", map[string]string{"title": "План", "content": "второй"})
+	if !strings.Contains(res.Text(), "план-20260927-120000-2.md") {
+		t.Fatalf("второй отчёт: %s", res.Text())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "план-20260927-120000.md"))
+	if !strings.Contains(string(b), "первый") {
+		t.Fatalf("первый отчёт затёрт: %s", b)
+	}
+}
