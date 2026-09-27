@@ -372,6 +372,9 @@ func (t *Tracker) Digest(code string, window time.Duration) (Digest, error) {
 	d.Avg = sum / float64(len(samples))
 	if d.First != 0 {
 		d.ChangePct = (d.Last/d.First - 1) * 100
+		if math.Abs(d.ChangePct) < 0.0005 {
+			d.ChangePct = 0 // иначе в сводке «-0.000%» от ошибки округления
+		}
 	}
 	return d, nil
 }
