@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,6 +44,9 @@ type Config struct {
 	// долговременная (по пользователю) (день 11). Отдельно от разговоров:
 	// слои переживают разговор и принадлежат не ему.
 	MemoryDir string `yaml:"memory_dir"`
+	// MCPServers — MCP-серверы, к которым умеет подключаться стенд (день 16):
+	// удалённые по адресу, локальные по команде запуска.
+	MCPServers []mcp.Spec `yaml:"mcp_servers"`
 }
 
 var ErrNoKey = errors.New("не найден API-ключ")
@@ -112,6 +116,20 @@ func (c *Config) merge(o *Config) {
 	if o.SessionsDir != "" {
 		c.SessionsDir = o.SessionsDir
 	}
+	// MCP-серверы из config.local.yaml заменяют одноимённые целиком,
+	// а новые добавляются: так можно подставить свой адрес или заголовок
+	// с ключом, не трогая общий config.yaml.
+	for _, ms := range o.MCPServers {
+		replaced := false
+		for i := range c.MCPServers {
+			if c.MCPServers[i].Name == ms.Name {
+				c.MCPServers[i], replaced = ms, true
+			}
+		}
+		if !replaced {
+			c.MCPServers = append(c.MCPServers, ms)
+		}
+	}
 	for _, op := range o.Providers {
 		found := false
 		for i := range c.Providers {
@@ -151,6 +169,18 @@ func (c *Config) Provider(name string) (*Provider, error) {
 		}
 	}
 	return nil, fmt.Errorf("провайдер %q не найден в config.yaml", name)
+}
+
+// MCPServer — описание MCP-сервера по имени из mcp_servers.
+func (c *Config) MCPServer(name string) (mcp.Spec, error) {
+	var names []string
+	for _, s := range c.MCPServers {
+		if s.Name == name {
+			return s, nil
+		}
+		names = append(names, s.Name)
+	}
+	return mcp.Spec{}, fmt.Errorf("mcp-сервер %q не найден в config.yaml (есть: %s)", name, strings.Join(names, ", "))
 }
 
 // Key достаёт ключ: сначала env (приоритет), затем config.local.yaml.

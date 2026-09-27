@@ -111,3 +111,20 @@ providers:
         out_per_1m: 2.40
         max_context: 128000
         url: http://127.0.0.1:8099/v1
+
+# MCP-серверы (день 16). Удалённые — по адресу (Streamable HTTP).
+# Все три — публичные и без ключа: на этом шаге нужно только соединиться
+# и получить список инструментов.
+mcp_servers:
+  - name: deepwiki
+    url: https://mcp.deepwiki.com/mcp
+    description: документация GitHub-репозиториев от Devin
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    description: свежая документация библиотек
+    # С ключом лимиты выше; без ключа тоже работает.
+    headers:
+      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
+  - name: gitmcp
+    url: https://gitmcp.io/docs
+    description: документация любого GitHub-проекта; выдаёт сессию
