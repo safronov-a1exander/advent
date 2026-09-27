@@ -287,9 +287,6 @@ func VariantLabel(r Result) string {
 	if len(c.MCP) > 0 {
 		label += " + MCP " + strings.Join(c.MCP, ", ")
 	}
-	if len(c.MCP) > 0 {
-		label += " + MCP " + strings.Join(c.MCP, ", ")
-	}
 	if c.TaskState != "" {
 		label += " + " + agent.TaskLabel(c.TaskState)
 		if c.TaskMap == agent.TaskMapPrompt {
