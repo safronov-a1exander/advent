@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -13,6 +14,10 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrSessionExpired — сервер забыл сессию (перезапустился или закрыл её).
+// Лечится новым рукопожатием; Hub делает его сам.
+var ErrSessionExpired = errors.New("сессия больше не действует: нужно заново initialize")
 
 // HTTP — транспорт Streamable HTTP: каждое сообщение клиента — отдельный
 // POST на один и тот же адрес. Сервер отвечает на запрос либо обычным
@@ -99,7 +104,7 @@ func (h *HTTP) Call(ctx context.Context, id int64, body []byte) (message, error)
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if resp.StatusCode == http.StatusNotFound && h.Session() != "" {
-			return message{}, fmt.Errorf("сессия %s больше не действует: нужно заново initialize", h.Session())
+			return message{}, fmt.Errorf("%w: %s", ErrSessionExpired, h.Session())
 		}
 		return message{}, fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}

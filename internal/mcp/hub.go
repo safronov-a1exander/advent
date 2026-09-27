@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -150,6 +151,14 @@ func (h *Hub) Call(ctx context.Context, fn, args string, allowed []string) Outco
 		return o
 	}
 	res, err := c.CallTool(ctx, tool, json.RawMessage(args))
+	if errors.Is(err, ErrSessionExpired) {
+		// Удалённый сервер перезапустился, пока агент жил: для сервера
+		// с расписанием это обычное дело. Новое рукопожатие и повтор.
+		h.drop(server)
+		if c, _, err = h.client(ctx, server); err == nil {
+			res, err = c.CallTool(ctx, tool, json.RawMessage(args))
+		}
+	}
 	if err != nil {
 		o.IsError, o.Text = true, err.Error()
 		o.Latency = time.Since(start)
@@ -177,6 +186,17 @@ func (h *Hub) resolve(fn string, allowed []string) (server, tool string, ok bool
 		return s, t, false
 	}
 	return "", fn, false
+}
+
+// drop забывает соединение с сервером: следующий вызов поднимет новое.
+func (h *Hub) drop(server string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c, ok := h.clients[server]; ok {
+		c.Close()
+		delete(h.clients, server)
+		delete(h.tools, server)
+	}
 }
 
 // Close закрывает все соединения; локальные серверы при этом завершаются.
