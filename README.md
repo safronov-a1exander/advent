@@ -49,7 +49,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -75,6 +75,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 15 | `day-15` | контролируемые переходы: карта стадий, откаты, красный путь | `docs/days/day15.md` |
 | 16 | `day-16` | подключение к MCP: рукопожатие и список инструментов | `docs/days/day16.md` |
 | 17 | `day-17` | свой MCP-сервер вокруг API ЦБ, агент вызывает инструмент | `docs/days/day17.md` |
+| 18 | `day-18` | планировщик: сервер копит замеры сам, агент присылает сводку по расписанию | `docs/days/day18.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -93,6 +94,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | сохранённые разговоры | `advent sessions`, `advent sessions -show <id>` · в чате `-new`, `-session <id>`, `-no-save` | — |
 | сравнение | `advent lab -scenario ...` | `r` прогнать · `↑↓` вариант · `t` сводка · `Tab` панель и блокнот · `Esc` к результатам · `q` выход |
 | одиночный запрос | `advent ask "вопрос"` | — |
+| сводка по расписанию | `advent mcp-server rates -http 127.0.0.1:8765` и `advent watch -every 5m` (или `-once` из cron) | — |
 | MCP-серверы | `advent mcp`, `advent mcp -server gitmcp -wire`, `advent mcp -url <адрес>`, `advent mcp -server rates -call convert -args '{…}'` · свой сервер `advent mcp-server rates` | — |
 
 В панели: `↑↓` — поле, `←→` — значение, `Enter` — ввести вручную

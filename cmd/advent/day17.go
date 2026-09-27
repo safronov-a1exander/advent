@@ -12,8 +12,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
@@ -24,23 +26,67 @@ import (
 func cmdMCPServer(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("mcp-server", flag.ExitOnError)
 	verbose := fs.Bool("log", false, "журнал вызовов в stderr")
+	httpAddr := fs.String("http", "", "слушать Streamable HTTP на адресе вместо stdio, например 127.0.0.1:8765 (день 18)")
+	data := fs.String("data", "runs/mcp/rates-watch.json", "файл заданий слежения и замеров (день 18)")
+	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
+	// Имя сервера — первый аргумент, флаги можно писать и после него.
+	name := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name, args = args[0], args[1:]
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	name := fs.Arg(0)
 	var srv *mcp.Server
+	var tracker *rates.Tracker
 	switch name {
 	case "rates":
-		srv = rates.New(rates.NewCBR())
+		var m rates.Market = rates.NewCoinbase()
+		switch *market {
+		case "coinbase":
+		case "walk":
+			m = &rates.Walk{}
+		default:
+			return fmt.Errorf("-market: coinbase или walk, а не %q", *market)
+		}
+		tr, err := rates.NewTracker(*data, m)
+		if err != nil {
+			return err
+		}
+		tracker = tr
+		srv = rates.WithTracker(rates.New(rates.NewCBR()), tr)
 	default:
 		return fmt.Errorf("неизвестный сервер %q; есть: rates", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.
+	logger := log.New(os.Stderr, name+": ", log.LstdFlags)
 	if *verbose {
-		srv.Log = log.New(os.Stderr, name+": ", log.LstdFlags)
+		srv.Log = logger
 	}
-	return srv.ServeStdio(ctx, os.Stdin, os.Stdout)
+	if tracker != nil {
+		if *verbose || *httpAddr != "" {
+			tracker.Log = logger.Printf
+		}
+		// Планировщик живёт, пока жив процесс. На stdio это время жизни
+		// клиента; чтобы следить 24/7, сервер запускают по HTTP отдельно.
+		go tracker.Run(ctx, 5*time.Second)
+	}
+	if *httpAddr == "" {
+		return srv.ServeStdio(ctx, os.Stdin, os.Stdout)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", srv.HTTPHandler())
+	hs := &http.Server{Addr: *httpAddr, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		hs.Close()
+	}()
+	logger.Printf("слушаю http://%s/mcp · задания и замеры в %s", *httpAddr, *data)
+	if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }
 
 // callTool — один вызов инструмента руками, без модели: проверить сервер

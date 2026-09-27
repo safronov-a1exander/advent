@@ -120,6 +120,12 @@ mcp_servers:
     command: "@self"
     args: [mcp-server, rates]
     description: курсы валют ЦБ РФ — свой сервер стенда вокруг API ЦБ
+  # Тот же сервер, но отдельным процессом по HTTP (день 18): ему нужно
+  # жить и делать замеры, когда к нему никто не подключён. Запуск:
+  #   advent mcp-server rates -http 127.0.0.1:8765
+  - name: rates-live
+    url: http://127.0.0.1:8765/mcp
+    description: курсы и слежение по расписанию — долгоживущий сервер
   - name: deepwiki
     url: https://mcp.deepwiki.com/mcp
     description: документация GitHub-репозиториев от Devin

@@ -47,6 +47,10 @@ type rule struct {
 	tool string // имя инструмента без префикса сервера
 	when func(q string) bool
 	args func(q string, results []string) map[string]any
+	// many — несколько вызовов одного инструмента за круг (параллельные
+	// tool_calls), например по вызову на каждую валюту. Если задано,
+	// args не используется.
+	many func(q string, results []string) []map[string]any
 }
 
 var (
@@ -59,6 +63,36 @@ var (
 		{"тенге", "KZT"}, {"драм", "AMD"},
 	}
 )
+
+// currenciesOf — все валюты, упомянутые в тексте, по порядку и без повторов.
+func currenciesOf(q string) []string {
+	q = strings.ToLower(q)
+	type hit struct {
+		at   int
+		code string
+	}
+	var hits []hit
+	seen := map[string]bool{}
+	for _, c := range append(currencies, struct{ word, code string }{"биткоин", "BTC"}, struct{ word, code string }{"btc", "BTC"}) {
+		if i := strings.Index(q, c.word); i >= 0 && !seen[c.code] {
+			seen[c.code] = true
+			hits = append(hits, hit{i, c.code})
+		}
+	}
+	for i := 1; i < len(hits); i++ {
+		for j := i; j > 0 && hits[j].at < hits[j-1].at; j-- {
+			hits[j], hits[j-1] = hits[j-1], hits[j]
+		}
+	}
+	var out []string
+	for _, h := range hits {
+		out = append(out, h.code)
+	}
+	return out
+}
+
+// watchedRe — строки list_watches: «USD: каждые 1m0s, …».
+var watchedRe = regexp.MustCompile(`(?m)^([A-Z]{3,5}): каждые`)
 
 func currencyOf(q string) string {
 	q = strings.ToLower(q)
@@ -81,6 +115,50 @@ func firstNumber(q string) (float64, bool) {
 
 var rules = []rule{
 	{
+		tool: "watch_rate",
+		when: func(q string) bool { return strings.Contains(strings.ToLower(q), "следи ") && len(currenciesOf(q)) > 0 },
+		many: func(q string, _ []string) []map[string]any {
+			every := "1m"
+			if m := regexp.MustCompile(`каждые?\s+(\d+)\s*(сек|мин|час)`).FindStringSubmatch(strings.ToLower(q)); m != nil {
+				every = m[1] + map[string]string{"сек": "s", "мин": "m", "час": "h"}[m[2]]
+			}
+			var out []map[string]any
+			for _, c := range currenciesOf(q) {
+				out = append(out, map[string]any{"currency": c, "every": every})
+			}
+			return out
+		},
+	},
+	{
+		tool: "list_watches",
+		when: func(q string) bool {
+			l := strings.ToLower(q)
+			return strings.Contains(l, "следишь") || strings.Contains(l, "отслежива")
+		},
+		args: func(string, []string) map[string]any { return map[string]any{} },
+	},
+	{
+		tool: "rate_digest",
+		when: func(q string) bool { return strings.Contains(strings.ToLower(q), "сводк") },
+		many: func(q string, results []string) []map[string]any {
+			codes := currenciesOf(q)
+			for _, r := range results {
+				for _, m := range watchedRe.FindAllStringSubmatch(r, -1) {
+					codes = append(codes, m[1])
+				}
+			}
+			var out []map[string]any
+			seen := map[string]bool{}
+			for _, c := range codes {
+				if !seen[c] {
+					seen[c] = true
+					out = append(out, map[string]any{"currency": c, "window": "1h"})
+				}
+			}
+			return out
+		},
+	},
+	{
 		tool: "convert",
 		when: func(q string) bool {
 			_, n := firstNumber(q)
@@ -99,7 +177,7 @@ var rules = []rule{
 		tool: "exchange_rate",
 		when: func(q string) bool {
 			l := strings.ToLower(q)
-			return currencyOf(q) != "" && strings.Contains(l, "курс") && !strings.Contains(l, "сколько")
+			return currencyOf(q) != "" && strings.Contains(l, "курс") && !strings.Contains(l, "сколько") && !strings.Contains(l, "след")
 		},
 		args: func(q string, _ []string) map[string]any { return map[string]any{"currency": currencyOf(q)} },
 	},
@@ -131,10 +209,23 @@ func mockTools(req chatReq) (calls []toolCall, text string, ok bool) {
 		if fn == "" || called[fn] || !r.when(q) {
 			continue
 		}
-		args, _ := json.Marshal(r.args(q, results))
-		tc := toolCall{ID: fmt.Sprintf("call_%d", len(called)+1), Type: "function"}
-		tc.Function.Name, tc.Function.Arguments = fn, string(args)
-		return []toolCall{tc}, "", true
+		var list []map[string]any
+		if r.many != nil {
+			list = r.many(q, results)
+		} else {
+			list = []map[string]any{r.args(q, results)}
+		}
+		if len(list) == 0 {
+			continue
+		}
+		var calls []toolCall
+		for i, a := range list {
+			args, _ := json.Marshal(a)
+			tc := toolCall{ID: fmt.Sprintf("call_%d_%d", len(called)+1, i+1), Type: "function"}
+			tc.Function.Name, tc.Function.Arguments = fn, string(args)
+			calls = append(calls, tc)
+		}
+		return calls, "", true
 	}
 	if len(results) == 0 {
 		return nil, "", false
