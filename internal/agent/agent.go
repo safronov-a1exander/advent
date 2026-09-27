@@ -28,6 +28,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
@@ -64,6 +65,12 @@ const (
 	// Не вызов API, а решение: пользователь должен видеть, куда свернул
 	// его запрос, до того как получит ответ.
 	EventPipeline
+	// EventToolCall — модель попросила вызвать MCP-инструмент (день 17):
+	// Label — «сервер.инструмент», Content — аргументы.
+	EventToolCall
+	// EventToolResult — инструмент ответил: Content — результат, Failed —
+	// ошибка инструмента, которую увидит модель.
+	EventToolResult
 )
 
 // Event — уведомление для того, кто показывает ответ. Агенту всё равно,
@@ -75,6 +82,8 @@ type Event struct {
 	Usage   llm.Usage
 	CostUSD float64
 	Latency time.Duration
+	// Failed — вызов инструмента кончился ошибкой (день 17).
+	Failed bool
 }
 
 // Step — один вызов LLM внутри ответа.
@@ -87,6 +96,8 @@ type Step struct {
 type Reply struct {
 	Final *llm.Response
 	Steps []Step
+	// Tools — вызовы MCP-инструментов по порядку (день 17).
+	Tools []mcp.Outcome
 }
 
 // Usage — суммарный расход всех шагов ответа.
@@ -169,6 +180,9 @@ type Agent struct {
 	inv *invariant.Set
 	// newInv — как поднять набор по id; ставит пул.
 	newInv func(string) (*invariant.Set, error)
+	// tools — MCP-серверы, к которым агент может обратиться (день 17);
+	// какие именно ему выданы, решает конфиг (Config.MCP).
+	tools Toolbox
 	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
 	// разговора меняют задачу или пользователя: слои должны переехать
 	// на другие файлы, а не продолжать писать в прежние.
@@ -434,8 +448,13 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	}
 	system = withMemory(system, a.memoryBlocks(cfg, mem))
 
+	// День 17: инструменты выданных серверов. Их схема уйдёт в каждый
+	// запрос хода, поэтому поднимаются они до оценки размера запроса.
+	funcs := a.functions(ctx, cfg, on)
+	turn.Tools = len(funcs)
+
 	a.mu.Lock()
-	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)))
+	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)) + rawEstimateTools(funcs))
 	turn.Sent = len(past)
 	a.mu.Unlock()
 
@@ -467,6 +486,16 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 		if st.Final && len(chain) > 1 {
 			on(Event{Kind: EventFinalStart, Label: st.Label})
+		}
+
+		if st.Final && len(funcs) > 0 {
+			resp, err := a.toolLoop(ctx, cfg, req, funcs, st, len(chain) > 1, &turn, reply, on)
+			if err != nil {
+				return reply, err
+			}
+			reply.Steps = append(reply.Steps, Step{Label: st.Label, Response: resp})
+			reply.Final = resp
+			continue
 		}
 
 		resp, err := a.call(ctx, req, st, cfg.Stream, on)

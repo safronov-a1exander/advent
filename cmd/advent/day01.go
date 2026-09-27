@@ -19,6 +19,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/invariant"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
@@ -71,6 +72,9 @@ type askFlags struct {
 	memoryTask string
 	memoryDir  string
 
+	// mcp — MCP-серверы из config.yaml через запятую (день 17).
+	mcp string
+
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
 }
@@ -100,6 +104,7 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.memoryMode, "memory", "", "слои памяти для chat/demo: пусто — выключены, manual — кладёт пользователь, auto — плюс раскладка агентом")
 	fs.StringVar(&a.memoryUser, "user", "", "чей долговременный слой памяти")
 	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
+	fs.StringVar(&a.mcp, "mcp", "", "MCP-серверы из config.yaml через запятую, чьи инструменты выданы агенту (день 17)")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
 }
@@ -383,6 +388,21 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 			opts.Notice = "часть сохранённых разговоров не прочиталась: " + err.Error()
 		}
 	}
+	// День 17: инструменты MCP. Соединение с сервером одно на процесс,
+	// поднимается при первом вопросе агента и закрывается на выходе —
+	// локальный сервер-подпроцесс уходит вместе с чатом.
+	if servers := splitList(a.mcp); len(servers) > 0 {
+		for _, s := range servers {
+			if _, err := a.cfg.MCPServer(s); err != nil {
+				return fmt.Errorf("-mcp: %w", err)
+			}
+		}
+		hub := mcp.NewHub(a.cfg.MCPServers)
+		defer hub.Close()
+		pool.SetToolbox(hub)
+		set.MCP = servers
+	}
+
 	m := tui.NewModel(opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
 

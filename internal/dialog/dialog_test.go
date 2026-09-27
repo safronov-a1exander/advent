@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"os"
 	"strings"
 	"sync"
@@ -284,5 +285,45 @@ func TestForbidAndPerVariantChecks(t *testing.T) {
 	}
 	if len(missing) != 1 || !strings.HasPrefix(missing[0], "лишнее:") {
 		t.Fatalf("непонятно, что не так: %v", missing)
+	}
+}
+
+func TestCheckToolsOrder(t *testing.T) {
+	got := []mcp.Outcome{
+		{Server: "budget", Tool: "search"},
+		{Server: "rates", Tool: "convert", IsError: true},
+		{Server: "rates", Tool: "convert"},
+		{Server: "budget", Tool: "save"},
+	}
+	if m := checkTools(got, []string{"budget.search", "rates.convert", "budget.save"}, false); len(m) != 0 {
+		t.Fatalf("порядок верный, а проверка ругается: %v", m)
+	}
+	if m := checkTools(got, []string{"budget.save", "budget.search"}, false); len(m) == 0 {
+		t.Fatal("обратный порядок должен не проходить")
+	}
+	if m := checkTools(got[1:2], []string{"rates.convert"}, false); len(m) == 0 {
+		t.Fatal("вызов с ошибкой не засчитывается")
+	}
+	if m := checkTools(got, nil, true); len(m) == 0 {
+		t.Fatal("no_tools при вызовах должен не проходить")
+	}
+}
+
+func TestUsesResult(t *testing.T) {
+	tools := []mcp.Outcome{{Text: "30000 TRY = 51940.5 RUB по курсу ЦБ на 19.09.2026 (1 TRY = 1.7314 RUB)"}}
+	q := "Сколько в рублях 30 000 лир?"
+	for ans, want := range map[string]bool{
+		"Это 51 940,5 рубля.":            true,
+		"Примерно 51 940.50 ₽":           true,
+		"Курс 1,73 рубля за лиру.":       true,
+		"Около 52 тысяч рублей.":         false,
+		"30 000 лир — это много рублей.": false,
+	} {
+		if got := usesResult(q, ans, tools); got != want {
+			t.Errorf("%q: %v, ждали %v", ans, got, want)
+		}
+	}
+	if usesResult(q, "51940.5", nil) {
+		t.Error("без инструментов опираться не на что")
 	}
 }

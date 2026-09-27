@@ -60,6 +60,9 @@ func (m *Model) tokenLine(reply *agent.Reply) string {
 		if t.AuxCalls > 0 {
 			parts = append(parts, fmt.Sprintf("+служебные %d→%d", t.AuxPrompt, t.AuxCompletion))
 		}
+		if t.Tools > 0 {
+			parts = append(parts, fmt.Sprintf("функций в схеме %d · вызвано %d", t.Tools, t.ToolCalls))
+		}
 	} else {
 		// ответ, начатый до сброса, в учёт не попал — показываем голый usage
 		parts = append(parts,

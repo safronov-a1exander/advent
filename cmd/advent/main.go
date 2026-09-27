@@ -45,6 +45,7 @@ func usage() {
   task      состояние задачи: стадия, шаг, план               (день 13)
   invariants ограничения, которые нельзя нарушать            (день 14)
   mcp       подключиться к MCP-серверам и показать инструменты (день 16)
+  mcp-server свой MCP-сервер стенда на stdio: rates            (день 17)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -93,6 +94,8 @@ func run() error {
 		return cmdInvariants(ctx, args)
 	case "mcp":
 		return cmdMCP(ctx, args)
+	case "mcp-server":
+		return cmdMCPServer(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

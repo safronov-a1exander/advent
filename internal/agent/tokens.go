@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -45,8 +46,22 @@ func rawEstimateMessages(msgs []llm.Message) float64 {
 	var n float64
 	for _, m := range msgs {
 		n += rawEstimate(m.Content) + messageOverhead
+		for _, tc := range m.ToolCalls {
+			n += rawEstimate(tc.Function.Name+tc.Function.Arguments) + messageOverhead
+		}
 	}
 	return n
+}
+
+// rawEstimateTools — оценка схемы функций (день 17). Схема — латиница
+// и JSON, на них токен длиннее, чем на русском тексте: около четырёх
+// символов.
+func rawEstimateTools(tools []llm.Tool) float64 {
+	if len(tools) == 0 {
+		return 0
+	}
+	b, _ := json.Marshal(tools)
+	return float64(len(b)) / 4
 }
 
 // Turn — расход одного хода диалога.
@@ -78,6 +93,14 @@ type Turn struct {
 	AuxCalls      int `json:"aux_calls,omitempty"`
 	AuxPrompt     int `json:"aux_prompt_tokens,omitempty"`
 	AuxCompletion int `json:"aux_completion_tokens,omitempty"`
+
+	// Инструменты MCP (день 17). Tools — сколько функций ушло модели в каждом
+	// запросе хода; ToolCalls — сколько вызовов она сделала; ToolRounds —
+	// сколько лишних обращений к API это стоило: после каждого круга
+	// вызовов модель спрашивают заново, со всей историей и схемой.
+	Tools      int `json:"tools,omitempty"`
+	ToolCalls  int `json:"tool_calls,omitempty"`
+	ToolRounds int `json:"tool_rounds,omitempty"`
 }
 
 // History — токены запроса без нового вопроса: system и прошлые реплики.

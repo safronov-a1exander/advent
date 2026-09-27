@@ -20,8 +20,10 @@ import (
 )
 
 type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 type chatReq struct {
@@ -31,6 +33,7 @@ type chatReq struct {
 	MaxTokens      *int      `json:"max_tokens"`
 	Stop           []string  `json:"stop"`
 	Stream         bool      `json:"stream"`
+	Tools          []toolDef `json:"tools"`
 	ResponseFormat *struct {
 		Type string `json:"type"`
 	} `json:"response_format"`
@@ -96,6 +99,13 @@ func main() {
 			return
 		}
 
+		// День 17: запрос со схемой функций — заглушка может попросить
+		// инструмент вместо ответа.
+		if calls, text, ok := mockTools(req); ok {
+			writeToolTurn(w, req, calls, text, *delay)
+			return
+		}
+
 		// Если у запроса просят JSON — отдаём JSON. Иначе на заглушке
 		// проверки формата всегда красные, и репетиция ничего не проверяет:
 		// непонятно, сломан сценарий или просто заглушка отвечает прозой.
@@ -148,6 +158,11 @@ func main() {
 		promptTokens := 0
 		for _, m := range req.Messages {
 			promptTokens += len([]rune(m.Content))/2 + 4
+		}
+		// Схема функций — тоже вход, даже когда ни одна не вызвана (день 17).
+		if len(req.Tools) > 0 {
+			schema, _ := json.Marshal(req.Tools)
+			promptTokens += len(schema) / 4
 		}
 
 		// Окно контекста: запрос вместе с потолком ответа не должен его

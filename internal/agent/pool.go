@@ -55,6 +55,10 @@ type Pool struct {
 
 	// invStore — где лежат наборы инвариантов (день 14).
 	invStore invariant.Store
+
+	// tools — MCP-серверы, общие на пул (день 17): соединение с сервером
+	// одно, а какие серверы выданы агенту, решает его конфиг.
+	tools Toolbox
 }
 
 // SetInvariantStore включает инварианты.
@@ -330,6 +334,7 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 		journal:  p.journal,
 		cfg:      cfg.Clone(),
 		temp:     temp,
+		tools:    p.tools,
 	}
 	p.wireProfile(a, cfg)
 	p.wireTask(a, cfg)
@@ -393,6 +398,7 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			client:   p.client,
 			journal:  p.journal,
 			cfg:      snap.Config.Clone(),
+			tools:    p.tools,
 			history:  append([]llm.Message(nil), snap.History...),
 			stats:    snap.Stats,
 			turns:    append([]Turn(nil), snap.Turns...),

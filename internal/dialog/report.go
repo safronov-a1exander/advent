@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/agent"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
 )
 
@@ -77,6 +78,15 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 		if len(l.Forbid) > 0 {
 			fmt.Fprintf(&b, "Не должно быть ни у кого: %s\n\n", "`"+strings.Join(l.Forbid, "`, `")+"`")
 		}
+		if len(l.Tools) > 0 {
+			fmt.Fprintf(&b, "Инструменты по порядку: %s\n\n", "`"+strings.Join(l.Tools, "` → `")+"`")
+		}
+		if l.NoTools {
+			b.WriteString("Инструменты звать незачем.\n\n")
+		}
+		if l.UsesResult {
+			b.WriteString("Ответ должен опираться на результат инструмента.\n\n")
+		}
 		// Ожидания у профилей разные по построению: джуниору код нужен,
 		// продакту запрещён. Поэтому персональные проверки печатаются рядом,
 		// иначе по отчёту непонятно, почему один вариант «прошёл», а другой
@@ -111,7 +121,17 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 			if st.Branch != "" && st.Branch != agent.MainBranch {
 				where = " _(ветка «" + st.Branch + "»)_"
 			}
-			fmt.Fprintf(&b, "- **%s**%s %s\n  > %s\n", r.Variant.Name, where, mark, cell(st.Answer, 400))
+			fmt.Fprintf(&b, "- **%s**%s %s\n", r.Variant.Name, where, mark)
+			// День 17: что агент вызывал и что получил — до ответа, потому
+			// что ответ собран из этого.
+			for _, o := range st.Tools {
+				res := "↳"
+				if o.IsError {
+					res = "✗"
+				}
+				fmt.Fprintf(&b, "  - ⚙ `%s` `%s` %s %s\n", displayTool(o), cell(o.Args, 160), res, cell(o.Text, 200))
+			}
+			fmt.Fprintf(&b, "  > %s\n", cell(st.Answer, 400))
 		}
 		b.WriteString("\n")
 	}
@@ -264,6 +284,12 @@ func VariantLabel(r Result) string {
 	if c.Profile != "" {
 		label += " + профиль " + c.Profile
 	}
+	if len(c.MCP) > 0 {
+		label += " + MCP " + strings.Join(c.MCP, ", ")
+	}
+	if len(c.MCP) > 0 {
+		label += " + MCP " + strings.Join(c.MCP, ", ")
+	}
 	if c.TaskState != "" {
 		label += " + " + agent.TaskLabel(c.TaskState)
 		if c.TaskMap == agent.TaskMapPrompt {
@@ -282,4 +308,13 @@ func cell(s string, n int) string {
 		s = string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// displayTool — «сервер.инструмент», а если модель назвала функцию,
+// которой нет, — то имя, что она назвала.
+func displayTool(o mcp.Outcome) string {
+	if o.Server == "" || o.Tool == "" {
+		return o.Func
+	}
+	return o.Server + "." + o.Tool
 }
