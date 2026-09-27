@@ -21,7 +21,7 @@ func WithTracker(s *mcp.Server, tr *Tracker) *mcp.Server {
 			"с заданным периодом и хранит их. Повторный вызов для той же валюты меняет период. Криптовалюты тоже можно: BTC, ETH.",
 		InputSchema: mcp.Schema(
 			mcp.Prop{Name: "currency", Type: "string", Required: true, Description: "код валюты: USD, EUR, TRY, BTC…"},
-			mcp.Prop{Name: "every", Type: "string", Required: true, Description: "период замеров: 30s, 5m, 1h"},
+			mcp.Prop{Name: "every", Type: "string", Required: true, Description: "период замеров как Go duration: 10s, 20s, 5m, 1h; не чаще раза в 10s"},
 		),
 		Annotations: &mcp.Annotations{ReadOnlyHint: &f, DestructiveHint: &f, IdempotentHint: &t},
 	}, func(ctx context.Context, raw json.RawMessage) mcp.CallResult {
