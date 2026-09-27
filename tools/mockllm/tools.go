@@ -116,7 +116,9 @@ func firstNumber(q string) (float64, bool) {
 var rules = []rule{
 	{
 		tool: "watch_rate",
-		when: func(q string) bool { return strings.Contains(strings.ToLower(q), "следи ") && len(currenciesOf(q)) > 0 },
+		when: func(q string) bool {
+			return strings.Contains(strings.ToLower(q), "следи ") && len(currenciesOf(q)) > 0
+		},
 		many: func(q string, _ []string) []map[string]any {
 			every := "1m"
 			if m := regexp.MustCompile(`каждые?\s+(\d+)\s*(сек|мин|час)`).FindStringSubmatch(strings.ToLower(q)); m != nil {
