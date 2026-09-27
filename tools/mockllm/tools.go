@@ -45,7 +45,7 @@ type toolCall struct {
 // rule — когда и как звать инструмент.
 type rule struct {
 	tool string // имя инструмента без префикса сервера
-	when func(q string) bool
+	when func(q string, results []string) bool
 	args func(q string, results []string) map[string]any
 	// many — несколько вызовов одного инструмента за круг (параллельные
 	// tool_calls), например по вызову на каждую валюту. Если задано,
@@ -114,9 +114,56 @@ func firstNumber(q string) (float64, bool) {
 }
 
 var rules = []rule{
+	// День 19: цепочка поиск → сводка → отчёт.
+	{
+		tool: "search_transactions",
+		when: func(q string, _ []string) bool {
+			l := strings.ToLower(q)
+			return strings.Contains(l, "трат") || strings.Contains(l, "операц") || strings.Contains(l, "найди") || strings.Contains(l, "покупк")
+		},
+		args: func(q string, _ []string) map[string]any {
+			l := strings.ToLower(q)
+			for word, cat := range map[string]string{"кафе": "кафе", "такси": "транспорт", "транспорт": "транспорт",
+				"продукт": "продукты", "покупк": "покупки", "здоров": "здоровье", "подписк": "подписки"} {
+				if strings.Contains(l, word) {
+					return map[string]any{"category": cat}
+				}
+			}
+			if strings.Contains(l, "яндекс") {
+				return map[string]any{"query": "YANDEX"}
+			}
+			return map[string]any{}
+		},
+	},
+	{
+		tool: "summarize_transactions",
+		when: func(_ string, results []string) bool {
+			return lastWith(results, "Найдено операций") != ""
+		},
+		args: func(_ string, results []string) map[string]any {
+			r := lastWith(results, "Найдено операций")
+			if m := regexp.MustCompile(`dataset_id: (ds-\d+)`).FindStringSubmatch(r); m != nil {
+				return map[string]any{"dataset_id": m[1]}
+			}
+			var txs []any
+			if i := strings.Index(r, "["); i >= 0 {
+				json.Unmarshal([]byte(r[i:]), &txs)
+			}
+			return map[string]any{"transactions": txs}
+		},
+	},
+	{
+		tool: "save_report",
+		when: func(q string, results []string) bool {
+			return strings.Contains(strings.ToLower(q), "сохрани") && lastWith(results, "Сводка sum-") != ""
+		},
+		args: func(q string, results []string) map[string]any {
+			return map[string]any{"title": "Отчёт по тратам", "content": lastWith(results, "Сводка sum-")}
+		},
+	},
 	{
 		tool: "watch_rate",
-		when: func(q string) bool {
+		when: func(q string, _ []string) bool {
 			return strings.Contains(strings.ToLower(q), "следи ") && len(currenciesOf(q)) > 0
 		},
 		many: func(q string, _ []string) []map[string]any {
@@ -133,7 +180,7 @@ var rules = []rule{
 	},
 	{
 		tool: "list_watches",
-		when: func(q string) bool {
+		when: func(q string, _ []string) bool {
 			l := strings.ToLower(q)
 			return strings.Contains(l, "следишь") || strings.Contains(l, "отслежива")
 		},
@@ -141,7 +188,7 @@ var rules = []rule{
 	},
 	{
 		tool: "rate_digest",
-		when: func(q string) bool { return strings.Contains(strings.ToLower(q), "сводк") },
+		when: func(q string, _ []string) bool { return strings.Contains(strings.ToLower(q), "сводк") },
 		many: func(q string, results []string) []map[string]any {
 			codes := currenciesOf(q)
 			for _, r := range results {
@@ -162,7 +209,7 @@ var rules = []rule{
 	},
 	{
 		tool: "convert",
-		when: func(q string) bool {
+		when: func(q string, _ []string) bool {
 			_, n := firstNumber(q)
 			return currencyOf(q) != "" && n && strings.Contains(strings.ToLower(q), "сколько")
 		},
@@ -177,7 +224,7 @@ var rules = []rule{
 	},
 	{
 		tool: "exchange_rate",
-		when: func(q string) bool {
+		when: func(q string, _ []string) bool {
 			l := strings.ToLower(q)
 			return currencyOf(q) != "" && strings.Contains(l, "курс") && !strings.Contains(l, "сколько") && !strings.Contains(l, "след")
 		},
@@ -208,7 +255,7 @@ func mockTools(req chatReq) (calls []toolCall, text string, ok bool) {
 	}
 	for _, r := range rules {
 		fn := findTool(req.Tools, r.tool)
-		if fn == "" || called[fn] || !r.when(q) {
+		if fn == "" || called[fn] || !r.when(q, results) {
 			continue
 		}
 		var list []map[string]any
@@ -295,4 +342,14 @@ func writeToolTurn(w http.ResponseWriter, req chatReq, calls []toolCall, text st
 		fmt.Fprintf(w, "data: %s\n\n", b)
 	}
 	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// lastWith — последний результат инструмента, в котором есть sub.
+func lastWith(results []string, sub string) string {
+	for i := len(results) - 1; i >= 0; i-- {
+		if strings.Contains(results[i], sub) {
+			return results[i]
+		}
+	}
+	return ""
 }

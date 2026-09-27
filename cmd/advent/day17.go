@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
+	"github.com/safronov-a1exander/advent/internal/servers/budget"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
 )
 
@@ -28,6 +29,10 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 	verbose := fs.Bool("log", false, "журнал вызовов в stderr")
 	httpAddr := fs.String("http", "", "слушать Streamable HTTP на адресе вместо stdio, например 127.0.0.1:8765 (день 18)")
 	data := fs.String("data", "runs/mcp/rates-watch.json", "файл заданий слежения и замеров (день 18)")
+	handoff := fs.String("handoff", "ref", "budget: как данные идут от search к summarize — ref (dataset_id) | value (операции целиком) (день 19)")
+	statement := fs.String("statement", "data/statement.txt", "budget: файл выписки (день 19)")
+	year := fs.Int("year", 2026, "budget: год операций — в выписке его нет")
+	reportsDir := fs.String("reports", "reports/budget", "budget: куда save_report кладёт отчёты")
 	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
 	// Имя сервера — первый аргумент, флаги можно писать и после него.
 	name := ""
@@ -55,8 +60,17 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 		}
 		tracker = tr
 		srv = rates.WithTracker(rates.New(rates.NewCBR()), tr)
+	case "budget":
+		if *handoff != string(budget.ByRef) && *handoff != string(budget.ByValue) {
+			return fmt.Errorf("-handoff: ref или value, а не %q", *handoff)
+		}
+		txs, err := budget.Load(*statement, *year)
+		if err != nil {
+			return err
+		}
+		srv = budget.New(txs, budget.Options{Handoff: budget.Handoff(*handoff), ReportsDir: *reportsDir})
 	default:
-		return fmt.Errorf("неизвестный сервер %q; есть: rates", name)
+		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.
