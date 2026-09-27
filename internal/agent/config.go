@@ -80,6 +80,10 @@ type Config struct {
 	// Profile — id профиля пользователя (день 12): profiles/<id>.yaml.
 	// Пусто — без профиля, агент работает как на одиннадцатом дне.
 	Profile string `yaml:"profile" json:"profile,omitempty"`
+
+	// MCP — имена MCP-серверов из config.yaml, чьи инструменты выданы
+	// агенту (день 17). Пусто — агент без инструментов.
+	MCP []string `yaml:"mcp" json:"mcp,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -109,6 +113,9 @@ func (c Config) Clone() Config {
 	}
 	if c.SummarizeEvery != nil {
 		out.SummarizeEvery = llm.I(*c.SummarizeEvery)
+	}
+	if c.MCP != nil {
+		out.MCP = append([]string(nil), c.MCP...)
 	}
 	return out
 }
@@ -214,6 +221,9 @@ func (c Config) Summary() string {
 		}
 		parts = append(parts, mem)
 	}
+	if len(c.MCP) > 0 {
+		parts = append(parts, mcpSummary(c.MCP))
+	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
 	}
@@ -301,6 +311,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.Task != "" {
 		out.Task = top.Task
+	}
+	if top.MCP != nil {
+		out.MCP = append([]string(nil), top.MCP...)
 	}
 	return out
 }

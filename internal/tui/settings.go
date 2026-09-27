@@ -54,6 +54,10 @@ type Settings struct {
 	InvariantSet string
 	InvariantIDs []string
 
+	// День 17 — MCP-серверы, чьи инструменты выданы агенту. Ручки в панели
+	// нет: список задаётся флагом -mcp, как и сами серверы — в config.yaml.
+	MCP []string
+
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
 	Profiles []string
@@ -433,6 +437,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		Memory:         s.Memory,
 		User:           s.User,
 		Task:           s.Task,
+		MCP:            s.MCP,
 	}.Clone()
 }
 
@@ -463,6 +468,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.Memory = c.Memory
 	s.User = c.User
 	s.Task = c.Task
+	s.MCP = c.MCP
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

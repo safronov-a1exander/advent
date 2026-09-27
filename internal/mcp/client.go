@@ -53,7 +53,7 @@ type Option func(*Client)
 func WithTrace(t Trace) Option { return func(c *Client) { c.trace = t } }
 
 // clientInfo — как клиент представляется серверу.
-var clientInfo = Implementation{Name: "advent", Title: "Бюджет — ассистент по личным тратам", Version: "day-16"}
+var clientInfo = Implementation{Name: "advent", Title: "Бюджет — ассистент по личным тратам", Version: "day-17"}
 
 // Connect устанавливает соединение: initialize, ответ сервера со своей
 // ревизией протокола и возможностями, затем уведомление initialized.
@@ -141,6 +141,20 @@ func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 		}
 		cursor = res.NextCursor
 	}
+}
+
+// CallTool вызывает инструмент. args — JSON-объект аргументов, как его
+// собрала модель; nil — без аргументов.
+func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (*CallResult, error) {
+	raw, err := c.call(ctx, "tools/call", callToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return nil, fmt.Errorf("%s: tools/call %s: %w", c.name, name, err)
+	}
+	var res CallResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("%s: ответ tools/call не разобрать: %w", c.name, err)
+	}
+	return &res, nil
 }
 
 // call — вызов метода с ожиданием результата.

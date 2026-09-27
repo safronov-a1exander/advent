@@ -23,6 +23,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/config"
 	"github.com/safronov-a1exander/advent/internal/dialog"
 	"github.com/safronov-a1exander/advent/internal/invariant"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/profile"
 	"github.com/safronov-a1exander/advent/internal/store"
 )
@@ -65,6 +66,11 @@ func cmdDialog(ctx context.Context, args []string) error {
 	pool.SetProfileStore(profile.NewFileStore(cfg.ProfilesDir))
 	pool.SetCatalog(tiersOf(prov.Models))
 	pool.SetInvariantStore(invariant.NewFileStore(cfg.InvariantsDir))
+	// День 17: инструменты MCP. Хаб один на прогон; какие серверы выданы
+	// варианту, решает его конфиг.
+	hub := mcp.NewHub(cfg.MCPServers)
+	defer hub.Close()
+	pool.SetToolbox(hub)
 
 	started := time.Now()
 	var mu sync.Mutex

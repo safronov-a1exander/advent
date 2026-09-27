@@ -745,6 +745,21 @@ func (m *Model) onEvent(e agent.Event) {
 			m.pushLine(stDim.Render(fmt.Sprintf("  ↳ служебный вызов: вход %d · выход %d токенов · %s",
 				e.Usage.PromptTokens, e.Usage.CompletionTokens, e.Latency.Round(time.Millisecond))))
 		}
+	case agent.EventToolCall:
+		// День 17: модель не ответила, а попросила инструмент. Показываем
+		// вызов ровно с теми аргументами, что она собрала сама.
+		m.pushLine(stNote.Render("▸ вызов " + e.Label + " " + shorten(oneLine(e.Content), 160)))
+	case agent.EventToolResult:
+		st := stDim
+		mark := "  ↳ "
+		if e.Failed {
+			st, mark = stErr, "  ✗ "
+		}
+		line := mark + shorten(oneLine(e.Content), 220)
+		if e.Latency > 0 {
+			line += fmt.Sprintf(" · %s", e.Latency.Round(time.Millisecond))
+		}
+		m.pushLine(st.Render(line))
 	case agent.EventContext:
 		if e.Usage.PromptTokens == 0 {
 			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))

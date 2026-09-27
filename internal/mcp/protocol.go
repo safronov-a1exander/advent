@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ProtocolVersion — ревизия спецификации, которую просит клиент.
@@ -199,4 +200,62 @@ func propertyOrder(schema json.RawMessage) []string {
 		}
 	}
 	return names
+}
+
+// ---- вызов инструмента (день 17) ----
+
+type callToolParams struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// Content — кусок результата. Для инструментов почти всегда text;
+// картинки и ресурсы протокол тоже разрешает, но агенту они не нужны.
+type Content struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Data     string `json:"data,omitempty"`
+}
+
+// CallResult — ответ tools/call.
+//
+// IsError — ошибка самого инструмента: курс не найден, дата в будущем.
+// Это не сбой протокола, а результат, который надо показать модели,
+// чтобы она поправила аргументы. Сбой протокола приходит RPCError.
+type CallResult struct {
+	Content           []Content       `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
+}
+
+// Text — текстовая часть результата. Если текста нет, а есть
+// структурированный ответ, — он как JSON.
+func (r CallResult) Text() string {
+	var parts []string
+	for _, c := range r.Content {
+		switch c.Type {
+		case "text":
+			parts = append(parts, c.Text)
+		case "":
+		default:
+			parts = append(parts, "["+c.Type+" "+c.MimeType+"]")
+		}
+	}
+	if len(parts) == 0 && len(r.StructuredContent) > 0 {
+		return string(r.StructuredContent)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// TextResult — результат из одного куска текста.
+func TextResult(s string) CallResult {
+	return CallResult{Content: []Content{{Type: "text", Text: s}}}
+}
+
+// ErrorResult — ошибка инструмента, которую увидит модель.
+func ErrorResult(format string, a ...any) CallResult {
+	r := TextResult(fmt.Sprintf(format, a...))
+	r.IsError = true
+	return r
 }

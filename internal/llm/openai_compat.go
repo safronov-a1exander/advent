@@ -61,6 +61,7 @@ type wireReq struct {
 	Seed           *int            `json:"seed,omitempty"`
 	Stream         bool            `json:"stream,omitempty"`
 	StreamOptions  *streamOpts     `json:"stream_options,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
 }
 
 type streamOpts struct {
@@ -68,9 +69,23 @@ type streamOpts struct {
 }
 
 type wireMsg struct {
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content"`
-	Reasoning        string `json:"reasoning"`
+	Content          string         `json:"content"`
+	ReasoningContent string         `json:"reasoning_content"`
+	Reasoning        string         `json:"reasoning"`
+	ToolCalls        []wireToolCall `json:"tool_calls"`
+}
+
+// wireToolCall — вызов функции в ответе. В потоке он приходит кусками:
+// первый кусок несёт index, id и имя, следующие — продолжение аргументов
+// с тем же index.
+type wireToolCall struct {
+	Index    *int   `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type wireChoice struct {
@@ -128,6 +143,7 @@ func (c *Client) buildWire(req Request, stream bool) wireReq {
 		Thinking:       req.Thinking,
 		Seed:           req.Seed,
 		Stream:         stream,
+		Tools:          req.Tools,
 	}
 	if stream {
 		w.StreamOptions = &streamOpts{IncludeUsage: true}
@@ -182,6 +198,11 @@ func (c *Client) Chat(ctx context.Context, req Request) (*Response, error) {
 		Latency:      time.Since(start),
 		Raw:          raw,
 	}
+	var acc toolAcc
+	for _, tc := range ch.Message.ToolCalls {
+		acc.add(tc)
+	}
+	out.ToolCalls = acc.calls()
 	if wr.Usage != nil {
 		out.Usage = toUsage(wr.Usage)
 	}
@@ -202,6 +223,7 @@ func (c *Client) ChatStream(ctx context.Context, req Request, onChunk func(Chunk
 	}
 
 	var content, reasoning strings.Builder
+	var acc toolAcc
 	out := &Response{Model: req.Model}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -226,6 +248,9 @@ func (c *Client) ChatStream(ctx context.Context, req Request, onChunk func(Chunk
 		}
 		for _, ch := range wr.Choices {
 			d := ch.Delta
+			for _, tc := range d.ToolCalls {
+				acc.add(tc)
+			}
 			r := firstNonEmpty(d.ReasoningContent, d.Reasoning)
 			if d.Content != "" || r != "" {
 				content.WriteString(d.Content)
@@ -246,6 +271,7 @@ func (c *Client) ChatStream(ctx context.Context, req Request, onChunk func(Chunk
 	}
 	out.Content = content.String()
 	out.Reasoning = reasoning.String()
+	out.ToolCalls = acc.calls()
 	out.Latency = time.Since(start)
 	out.CostUSD = c.costOf(out.Model, req.Model, out.Usage)
 	if onChunk != nil {
@@ -339,4 +365,46 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// toolAcc собирает вызовы функций. Без потока каждый приходит целиком,
+// в потоке — кусками по index; оба случая сводятся к одному: дописать
+// аргументы к вызову с этим номером.
+type toolAcc struct {
+	order []int
+	byIdx map[int]*ToolCall
+}
+
+func (a *toolAcc) add(w wireToolCall) {
+	if a.byIdx == nil {
+		a.byIdx = map[int]*ToolCall{}
+	}
+	idx := len(a.order)
+	if w.Index != nil {
+		idx = *w.Index
+	}
+	tc, ok := a.byIdx[idx]
+	if !ok {
+		tc = &ToolCall{Type: "function"}
+		a.byIdx[idx] = tc
+		a.order = append(a.order, idx)
+	}
+	if w.ID != "" {
+		tc.ID = w.ID
+	}
+	if w.Function.Name != "" {
+		tc.Function.Name += w.Function.Name
+	}
+	tc.Function.Arguments += w.Function.Arguments
+}
+
+func (a *toolAcc) calls() []ToolCall {
+	if len(a.order) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(a.order))
+	for _, i := range a.order {
+		out = append(out, *a.byIdx[i])
+	}
+	return out
 }

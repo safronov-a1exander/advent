@@ -112,10 +112,14 @@ providers:
         max_context: 128000
         url: http://127.0.0.1:8099/v1
 
-# MCP-серверы (день 16). Удалённые — по адресу (Streamable HTTP).
-# Все три — публичные и без ключа: на этом шаге нужно только соединиться
-# и получить список инструментов.
+# MCP-серверы (день 16). Удалённые — по адресу (Streamable HTTP), локальные —
+# командой запуска (stdio, день 17). "@self" — сам advent: свои серверы стенда
+# живут в том же бинаре подкомандой mcp-server.
 mcp_servers:
+  - name: rates
+    command: "@self"
+    args: [mcp-server, rates]
+    description: курсы валют ЦБ РФ — свой сервер стенда вокруг API ЦБ
   - name: deepwiki
     url: https://mcp.deepwiki.com/mcp
     description: документация GitHub-репозиториев от Devin

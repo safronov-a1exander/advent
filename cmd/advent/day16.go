@@ -36,6 +36,8 @@ func cmdMCP(ctx context.Context, args []string) error {
 	full := fs.Bool("full", false, "печатать описания инструментов целиком")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом — для записи видео")
 	timeout := fs.Duration("timeout", 30*time.Second, "сколько ждать один сервер")
+	callName := fs.String("call", "", "вызвать инструмент сервера руками, без модели (день 17)")
+	callArgs := fs.String("args", "{}", "аргументы для -call, JSON-объект")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -74,7 +76,7 @@ func cmdMCP(ctx context.Context, args []string) error {
 		if i > 0 {
 			fmt.Println()
 		}
-		t, err := showServer(ctx, s, *wire, *full, *timeout)
+		t, err := showServer(ctx, s, *wire, *full, *timeout, *callName, *callArgs)
 		if err != nil {
 			failed++
 			fmt.Printf("   ✗ %v\n", err)
@@ -98,7 +100,7 @@ type mcpTotals struct {
 	servers, tools, schema int
 }
 
-func showServer(ctx context.Context, s mcp.Spec, wire, full bool, timeout time.Duration) (mcpTotals, error) {
+func showServer(ctx context.Context, s mcp.Spec, wire, full bool, timeout time.Duration, call, callArgs string) (mcpTotals, error) {
 	fmt.Printf("== %s · %s\n", s.Name, s.Where())
 	if s.Description != "" {
 		fmt.Printf("   %s\n", s.Description)
@@ -162,6 +164,11 @@ func showServer(ctx context.Context, s mcp.Spec, wire, full bool, timeout time.D
 		fmt.Fprintf(w, "   • %s(%s)\t%s\n", t.Name, strings.Join(ps, ", "), desc)
 	}
 	w.Flush()
+	if call != "" {
+		if err := callTool(ctx, cl, call, callArgs); err != nil {
+			return mcpTotals{}, err
+		}
+	}
 	return mcpTotals{tools: len(tools), schema: schema}, nil
 }
 

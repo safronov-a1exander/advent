@@ -29,7 +29,8 @@ internal/agent/      агент, пул агентов, флот из YAML      
 internal/dialog/     один диалог в нескольких стратегиях   (с day-09)
 internal/tui/        интерфейс на bubbletea                (с day-01)
 internal/metrics/    сходство ответов между повторами      (с day-04)
-internal/mcp/        клиент Model Context Protocol         (с day-16)
+internal/mcp/        клиент Model Context Protocol         (с day-16), сервер и хаб (с day-17)
+internal/servers/    свои MCP-серверы стенда               (с day-17)
 scenarios/           YAML-сценарии экспериментов
 agents/              флоты агентов для advent swarm
 data/                данные продукта: банковская выписка для шагов 2–5
@@ -48,7 +49,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -73,6 +74,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 14 | `day-14` | инварианты: правила, которые нельзя нарушать | `docs/days/day14.md` |
 | 15 | `day-15` | контролируемые переходы: карта стадий, откаты, красный путь | `docs/days/day15.md` |
 | 16 | `day-16` | подключение к MCP: рукопожатие и список инструментов | `docs/days/day16.md` |
+| 17 | `day-17` | свой MCP-сервер вокруг API ЦБ, агент вызывает инструмент | `docs/days/day17.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -91,7 +93,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | сохранённые разговоры | `advent sessions`, `advent sessions -show <id>` · в чате `-new`, `-session <id>`, `-no-save` | — |
 | сравнение | `advent lab -scenario ...` | `r` прогнать · `↑↓` вариант · `t` сводка · `Tab` панель и блокнот · `Esc` к результатам · `q` выход |
 | одиночный запрос | `advent ask "вопрос"` | — |
-| MCP-серверы | `advent mcp`, `advent mcp -server gitmcp -wire`, `advent mcp -url <адрес>` | — |
+| MCP-серверы | `advent mcp`, `advent mcp -server gitmcp -wire`, `advent mcp -url <адрес>`, `advent mcp -server rates -call convert -args '{…}'` · свой сервер `advent mcp-server rates` | — |
 
 В панели: `↑↓` — поле, `←→` — значение, `Enter` — ввести вручную
 (старое значение затирается), `Esc` — отмена.
@@ -121,6 +123,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 13 | `стадии` (выкл / руками / агентом) рядом с полем `задача`; `/stage` и `/step` из поля ввода; флаги `-task-state`, `-tasks-dir`; команда `advent task`; в сценарии — команда `stage` |
 | день 14 | `инварианты` (выкл / промпт / промпт + проверка) и `набор правил` — markdown-файлы в `invariants/<набор>/`, в каждом только текст правила; флаги `-invariants`, `-invariant-set`, `-invariants-dir`; команда `advent invariants` |
 | день 15 | карта переходов проверяется кодом; в `Ctrl+D` — куда можно и сколько отказов; `/stage` отказывает тем же текстом, что видит модель; флаг `-task-map prompt` оставляет правила только в промпте — для сравнения |
+| день 17 | флаг `-mcp rates` — MCP-серверы, чьи инструменты выданы агенту; в ленте `▸ вызов` — вызов, `↳` — ответ сервера; в сценарии — проверки `tools`, `uses_result`, `no_tools` и поле варианта `mcp` |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.

@@ -14,11 +14,45 @@ const (
 	RoleSystem    Role = "system"
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+	// RoleTool — результат инструмента, который клиент вернул модели (день 17).
+	RoleTool Role = "tool"
 )
 
 type Message struct {
 	Role    Role   `json:"role"`
 	Content string `json:"content"`
+	// ToolCalls — модель просит вызвать инструменты вместо ответа (день 17).
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// ToolCallID — на какой вызов отвечает сообщение с ролью tool.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	// ReasoningContent — рассуждение, с которым модель попросила инструмент.
+	// DeepSeek в режиме рассуждений требует вернуть его внутри того же хода,
+	// иначе отвечает 400; в остальных случаях поле пустое и не уходит.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+// Tool — описание функции, которую модель может попросить вызвать.
+// Для MCP-инструмента это его имя, описание и схема аргументов как есть.
+type Tool struct {
+	Type     string       `json:"type"` // всегда "function"
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ToolCall — просьба модели вызвать функцию. Arguments — JSON-объект
+// строкой: модель пишет его сама, и он бывает битым.
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 // ResponseFormat — контроль структуры ответа на стороне API.
@@ -47,6 +81,9 @@ type Request struct {
 	Thinking       *Thinking
 	Seed           *int
 	Stream         bool
+	// Tools — функции, доступные модели в этом запросе (день 17). Их схема
+	// уходит в каждый запрос и оплачивается как обычный вход.
+	Tools []Tool
 }
 
 type Usage struct {
@@ -58,14 +95,16 @@ type Usage struct {
 }
 
 type Response struct {
-	Model        string          `json:"model"`
-	Content      string          `json:"content"`
-	Reasoning    string          `json:"reasoning,omitempty"`
-	FinishReason string          `json:"finish_reason"`
-	Usage        Usage           `json:"usage"`
-	Latency      time.Duration   `json:"latency_ns"`
-	CostUSD      float64         `json:"cost_usd"`
-	Raw          json.RawMessage `json:"-"`
+	Model        string `json:"model"`
+	Content      string `json:"content"`
+	Reasoning    string `json:"reasoning,omitempty"`
+	FinishReason string `json:"finish_reason"`
+	// ToolCalls — модель не ответила, а попросила вызвать инструменты.
+	ToolCalls []ToolCall      `json:"tool_calls,omitempty"`
+	Usage     Usage           `json:"usage"`
+	Latency   time.Duration   `json:"latency_ns"`
+	CostUSD   float64         `json:"cost_usd"`
+	Raw       json.RawMessage `json:"-"`
 }
 
 // Chunk — единица потоковой выдачи.

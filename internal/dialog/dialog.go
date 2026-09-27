@@ -22,6 +22,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/agent"
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/task"
 )
@@ -84,6 +85,20 @@ type Line struct {
 	// У профилей ожидания разные по построению: джуниору код нужен,
 	// продакту запрещён, и общей проверкой это не выразить.
 	ExpectBy map[string]Check `yaml:"expect_by"`
+	// Tools — какие инструменты агент обязан вызвать на этой реплике и
+	// в каком порядке: «rates.convert» (день 17). Между ними могут быть
+	// другие вызовы — проверяется порядок, а не точное совпадение.
+	// Проверка варианта без MCP — это его смысл: он её не проходит.
+	Tools []string `yaml:"tools"`
+	// NoTools — на этой реплике инструменты звать незачем. Лишний вызов —
+	// это деньги и задержка, и модель, которая зовёт курс на «привет»,
+	// так же неправа, как модель, которая курс придумывает.
+	NoTools bool `yaml:"no_tools"`
+	// UsesResult — ответ обязан опираться на результат инструмента: в нём
+	// должно быть число из результата, которого не было в вопросе.
+	// «Получите и используйте результат» из задания дня 17 — ровно это:
+	// вызвать инструмент и ответить своими словами — не одно и то же.
+	UsesResult bool `yaml:"uses_result"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -110,7 +125,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult
 }
 
 // Load читает сценарий.
@@ -189,7 +204,9 @@ type Step struct {
 	// Violations — сколько инвариантов осталось нарушенными после
 	// повторов (день 14).
 	Violations int
-	Turn       agent.Turn
+	// Tools — вызовы инструментов на этом ходе по порядку (день 17).
+	Tools []mcp.Outcome
+	Turn  agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
 	Passed  bool
@@ -315,13 +332,14 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty(), Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult, Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
 			continue
 		}
 		st.Answer = reply.Final.Content
+		st.Tools = reply.Tools
 		_, st.Cost = reply.Usage()
 		if turns := a.Turns(); len(turns) > turnsBefore {
 			st.Turn = turns[len(turns)-1]
@@ -329,6 +347,14 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		}
 		if st.Checked {
 			st.Passed, st.Missing = check(st.Answer, want)
+			if miss := checkTools(st.Tools, l.Tools, l.NoTools); len(miss) > 0 {
+				st.Passed = false
+				st.Missing = append(st.Missing, miss...)
+			}
+			if l.UsesResult && !usesResult(l.Say, st.Answer, st.Tools) {
+				st.Passed = false
+				st.Missing = append(st.Missing, "в ответе нет чисел из результата инструмента")
+			}
 		}
 		res.Steps = append(res.Steps, st)
 	}
@@ -393,6 +419,9 @@ func (st Step) Brief(sent bool) string {
 	if st.Violations > 0 {
 		c += fmt.Sprintf(" ⛔%d", st.Violations)
 	}
+	if len(st.Tools) > 0 {
+		c += " ▸ " + agent.ToolTrace(st.Tools)
+	}
 	if st.Checked {
 		if st.Passed {
 			c += " ✓"
@@ -444,6 +473,31 @@ func check(answer string, want Check) (bool, []string) {
 		}
 	}
 	return len(missing) == 0, missing
+}
+
+// checkTools — вызваны ли нужные инструменты в нужном порядке. Имя —
+// «сервер.инструмент»; между ожидаемыми вызовами могут быть другие.
+// Вызов, кончившийся ошибкой, не засчитывается: инструмент не отработал.
+func checkTools(got []mcp.Outcome, want []string, none bool) []string {
+	var missing []string
+	if none && len(got) > 0 {
+		missing = append(missing, "лишний вызов: "+agent.ToolTrace(got))
+	}
+	i := 0
+	for _, w := range want {
+		found := false
+		for ; i < len(got); i++ {
+			if !got[i].IsError && got[i].Server+"."+got[i].Tool == w {
+				found, i = true, i+1
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, "не вызван: "+w)
+			break
+		}
+	}
+	return missing
 }
 
 // runCommand выполняет команду веток. Вариант без веток её пропускает —
