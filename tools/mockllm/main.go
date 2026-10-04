@@ -129,6 +129,8 @@ func main() {
 		switch {
 		case rewriteRequest(req.Messages):
 			source, sep = strings.Fields(mockRewrite(req.Messages)), " "
+		case citeRequest(req.Messages):
+			source, sep = chunkJSON(mockCite(req.Messages)), ""
 		case ragRequest(req.Messages):
 			source, sep = strings.Fields(mockRAG(req.Messages)), " "
 		case factsRequest(req.Messages):

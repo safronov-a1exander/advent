@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -42,4 +43,34 @@ func mockRewrite(msgs []message) string {
 		return strings.TrimSpace(text[i+len("Вопрос: "):])
 	}
 	return text
+}
+
+// День 24: вопрос с фрагментами и требованием ответить JSON с цитатами.
+// Заглушка цитирует первое предложение первого фрагмента — дословно,
+// чтобы проверка цитат на репетиции проходила, — и на него же ссылается.
+var citeFragRe = regexp.MustCompile(`(?s)id: (\S+) — [^\n]*\n(.*?)(?:\n\nid: |\n\n---)`)
+
+func citeRequest(msgs []message) bool {
+	i := lastUser(msgs)
+	return i >= 0 && strings.Contains(msgs[i].Content, `"quotes"`) && strings.Contains(msgs[i].Content, ragMarker)
+}
+
+func mockCite(msgs []message) string {
+	m := citeFragRe.FindStringSubmatch(msgs[lastUser(msgs)].Content)
+	if m == nil {
+		b, _ := json.Marshal(map[string]any{"known": false, "answer": "Не знаю. Уточните вопрос.", "sources": []string{}, "quotes": []any{}})
+		return string(b)
+	}
+	text := strings.TrimSpace(m[2])
+	quote := text
+	if i := strings.IndexAny(text, ".\n"); i > 20 {
+		quote = text[:i]
+	}
+	b, _ := json.Marshal(map[string]any{
+		"known":   true,
+		"answer":  "По базе знаний: " + quote,
+		"sources": []string{m[1]},
+		"quotes":  []map[string]string{{"id": m[1], "text": quote}},
+	})
+	return string(b)
 }

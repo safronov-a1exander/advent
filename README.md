@@ -52,7 +52,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → day-24 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -84,6 +84,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 21 | `day-21` | индексация документов: нарезка двумя способами, эмбеддинги bge-m3, индекс с метаданными | `docs/days/day21.md` |
 | 22 | `day-22` | первый RAG-запрос: поиск → фрагменты с вопросом → LLM, десять контрольных вопросов с RAG и без | `docs/days/day22.md` |
 | 23 | `day-23` | реранкинг и фильтрация: кандидаты → порог → кросс-энкодер → top-K, rewrite, сравнение режимов | `docs/days/day23.md` |
+| 24 | `day-24` | цитаты и источники: ответ JSON-ом, сверка цитат кодом, судья смысла, «не знаю» без модели | `docs/days/day24.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -140,6 +141,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 21 | разделы `embedders` и `rag` в `config.yaml`: модель эмбеддингов, что индексировать, как резать |
 | день 22 | `база знаний` и `фрагментов` (`rag`, `rag_k`); `/rag on` и `/rag off` из поля ввода; флаги `-rag`, `-embedder`; в сценарии — проверка `sources` |
 | день 23 | `кандидатов`, `реранк`, `порог реранка`, `rewrite` (`rag_candidates`, `rag_min_score`, `rag_rerank`, `rag_min_rerank`, `rag_rewrite`); `/rag rerank`, `/rag plain`, `/rag rewrite`; флаги `-rag-rerank`, `-rag-rewrite`; в сценарии — проверка `no_sources` |
+| день 24 | `цитаты` (`rag_cite`); `/rag cite`; флаг `-rag-cite`; в сценарии — проверки `cited`, `judge`, `idk`, `grounded` |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.

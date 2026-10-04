@@ -147,6 +147,28 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 			for _, h := range st.Sources {
 				fmt.Fprintf(&b, "  - ⌕ %.3f `%s` %s\n", h.Score, h.ID, cell(h.Section, 100))
 			}
+			// День 24: что показала проверка цитат и что решил судья.
+			if c := st.Citation; c != nil {
+				switch {
+				case c.Refused:
+					b.WriteString("  - ∅ «не знаю» сказал код: ни один фрагмент не прошёл порог\n")
+				case !c.Known:
+					b.WriteString("  - ∅ «не знаю» сказала модель\n")
+				default:
+					line := fmt.Sprintf("  - ❝ источников %d, цитат %d, дословно %d", len(c.IDs), len(c.Quotes), c.Verbatim())
+					if p := c.Problems(); len(p) > 0 {
+						line += " · " + strings.Join(p, "; ")
+					}
+					b.WriteString(line + "\n")
+				}
+			}
+			if v := st.Verdict; v != nil {
+				if v.Supported {
+					b.WriteString("  - ⚖ судья: смысл ответа подтверждён цитатами\n")
+				} else {
+					fmt.Fprintf(&b, "  - ⚖ судья: не подтверждено — %s\n", cell(v.Unsupported, 200))
+				}
+			}
 			fmt.Fprintf(&b, "  > %s\n", cell(st.Answer, 400))
 		}
 		b.WriteString("\n")

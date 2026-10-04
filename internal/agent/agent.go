@@ -104,6 +104,9 @@ type Reply struct {
 	Tools []mcp.Outcome
 	// Sources — фрагменты базы знаний, с которыми ушёл вопрос (день 22).
 	Sources []rag.Hit
+	// Citation — источники, цитаты и итог их проверки (день 24); nil — режим
+	// без цитат.
+	Citation *Citation
 }
 
 // Usage — суммарный расход всех шагов ответа.
@@ -463,8 +466,38 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	// День 22: фрагменты базы знаний — до оценки размера: они едут
 	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
-	hits := a.retrieve(ctx, cfg, hist, text, &turn, on)
+	found := a.retrieve(ctx, cfg, hist, text, &turn, on)
+	var hits []rag.Hit
+	if found != nil {
+		hits = found.Kept
+	}
 	question := augment(text, hits)
+
+	// День 24: с цитатами ответ приходит JSON-ом, который код разбирает
+	// и проверяет, — потоком его показывать нельзя. А если ни один фрагмент
+	// не прошёл порог, модель не спрашивают вовсе: «не знаю» говорит код.
+	cite := cfg.RAG != "" && cfg.RAGCite && found != nil
+	if cite && len(hits) == 0 {
+		content := dontKnow(cfg, found)
+		on(Event{Kind: EventChunk, Content: content})
+		reply := &Reply{
+			Final:    &llm.Response{Model: cfg.Model, Content: content, FinishReason: "stop"},
+			Citation: &Citation{Refused: true, Answer: content},
+		}
+		a.commit(text, content, turn, gen)
+		return reply, nil
+	}
+	stepOn := on
+	if cite {
+		question = augmentCite(text, hits)
+		cfg.Stream = false
+		cfg.ResponseFormat = "json_object"
+		stepOn = func(e Event) {
+			if e.Kind != EventChunk {
+				on(e)
+			}
+		}
+	}
 
 	a.mu.Lock()
 	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, question)) + rawEstimateTools(funcs))
@@ -502,7 +535,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		}
 
 		if st.Final && len(funcs) > 0 {
-			resp, err := a.toolLoop(ctx, cfg, req, funcs, st, len(chain) > 1, &turn, reply, on)
+			resp, err := a.toolLoop(ctx, cfg, req, funcs, st, len(chain) > 1, &turn, reply, stepOn)
 			if err != nil {
 				return reply, err
 			}
@@ -511,7 +544,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 			continue
 		}
 
-		resp, err := a.call(ctx, req, st, cfg.Stream, on)
+		resp, err := a.call(ctx, req, st, cfg.Stream, stepOn)
 		a.record(req, resp, err, st.Label, len(chain) > 1)
 		if err != nil {
 			return reply, err
@@ -543,6 +576,15 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// День 14: ответ проверяется на инварианты и при нарушении переписывается.
 	// До продвижения задачи: двигать стадию по ответу, который пользователь
 	// не увидит, неправильно.
+	// День 24: JSON с источниками и цитатами — в текст для человека,
+	// с итогом проверки кодом. До инвариантов: проверяться должно то,
+	// что увидит пользователь.
+	if cite {
+		reply.Citation = ParseCitation(reply.Final.Content, text, hits)
+		reply.Final.Content = reply.Citation.Render(hits)
+		on(Event{Kind: EventChunk, Content: reply.Final.Content})
+	}
+
 	final, broke := a.guard(ctx, cfg, inv, stage, compose(system, past, ""), text, reply.Final.Content, &turn, on)
 	if final != reply.Final.Content {
 		reply.Final.Content = final
@@ -555,11 +597,17 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// токенов, и они должны попасть в этот ход, а не потеряться.
 	a.advanceTask(ctx, cfg, tsk, text, reply.Final.Content, gen, &turn, on)
 
+	a.commit(text, reply.Final.Content, turn, gen)
+	return reply, nil
+}
+
+// commit кладёт законченный ход в историю и учёт.
+func (a *Agent) commit(text, answer string, turn Turn, gen uint64) {
 	a.mu.Lock()
 	if a.gen == gen {
 		a.history = append(a.history,
 			llm.Message{Role: llm.RoleUser, Content: text},
-			llm.Message{Role: llm.RoleAssistant, Content: reply.Final.Content})
+			llm.Message{Role: llm.RoleAssistant, Content: answer})
 		// ход без сброса попадает в учёт; начатый до сброса относится
 		// к стёртому разговору, и его рост токенов уже ни о чём не говорит
 		a.turns = append(a.turns, turn)
@@ -568,7 +616,6 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	a.touch()
 	a.mu.Unlock()
 	a.changed()
-	return reply, nil
 }
 
 // call — один вызов API. Финальный шаг при включённом стриминге идёт

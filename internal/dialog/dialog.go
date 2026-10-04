@@ -129,6 +129,22 @@ type Line struct {
 	// фрагмента (день 23). Посторонний текст в промпте модель принимает
 	// за контекст и строит ответ на нём.
 	NoSources bool `yaml:"no_sources"`
+	// Cited — ответ с источниками и цитатами, прошедший проверку кодом:
+	// у каждого источника цитата, цитаты дословно из фрагментов, числа
+	// ответа — из источников (день 24). Только у вариантов с rag_cite.
+	Cited bool `yaml:"cited"`
+	// IDK — ответа в базе нет, и ассистент обязан сказать «не знаю»:
+	// кодом при пустом поиске или моделью (known: false) (день 24).
+	IDK bool `yaml:"idk"`
+	// Judge — смысл ответа подтверждается цитатами, по мнению судьи —
+	// отдельного вызова модели (день 24). Код проверяет, что цитата
+	// дословная; что ответ говорит то же, что цитата, проверить может
+	// только модель.
+	Judge bool `yaml:"judge"`
+	// Grounded — не выдумка: либо «не знаю», либо ответ с проверенными
+	// цитатами, смысл которого подтвердил судья (день 24). Для вопросов,
+	// где честны оба исхода: нашёл — ответь по цитатам, не нашёл — скажи.
+	Grounded bool `yaml:"grounded"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -161,7 +177,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || len(l.Sources) > 0 || l.NoSources
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || len(l.Sources) > 0 || l.NoSources || l.Cited || l.IDK || l.Judge || l.Grounded
 }
 
 // Load читает сценарий.
@@ -244,7 +260,11 @@ type Step struct {
 	Tools []mcp.Outcome
 	// Sources — фрагменты базы знаний, с которыми ушёл вопрос (день 22).
 	Sources []rag.Hit
-	Turn    agent.Turn
+	// Citation — источники и цитаты ответа и итог их проверки (день 24);
+	// Verdict — решение судьи о смысле.
+	Citation *agent.Citation
+	Verdict  *agent.Verdict
+	Turn     agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
 	Passed  bool
@@ -370,7 +390,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || ((len(l.Sources) > 0 || l.NoSources) && cfg.RAG != ""), Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || ((len(l.Sources) > 0 || l.NoSources) && cfg.RAG != "") || ((l.Cited || l.IDK || l.Grounded) && cfg.RAG != "") || (l.Judge && cfg.RAGCite), Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -379,6 +399,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		st.Answer = reply.Final.Content
 		st.Tools = reply.Tools
 		st.Sources = reply.Sources
+		st.Citation = reply.Citation
 		_, st.Cost = reply.Usage()
 		if turns := a.Turns(); len(turns) > turnsBefore {
 			st.Turn = turns[len(turns)-1]
@@ -416,6 +437,14 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 				if l.NoSources && len(st.Sources) > 0 {
 					st.Passed = false
 					st.Missing = append(st.Missing, fmt.Sprintf("лишние фрагменты: %d", len(st.Sources)))
+				}
+			}
+			if cfg.RAG != "" && (l.Cited || l.IDK || l.Judge || l.Grounded) {
+				miss, cost := checkCitation(ctx, a, l, &st)
+				st.Cost += cost
+				if len(miss) > 0 {
+					st.Passed = false
+					st.Missing = append(st.Missing, miss...)
 				}
 			}
 			if l.UsesResult && !usesResult(l.Say, st.Answer, st.Tools) {
@@ -491,6 +520,14 @@ func (st Step) Brief(sent bool) string {
 	}
 	if len(st.Sources) > 0 {
 		c += fmt.Sprintf(" ⌕%d", len(st.Sources))
+	}
+	if ct := st.Citation; ct != nil {
+		switch {
+		case ct.Refused || !ct.Known:
+			c += " ∅"
+		default:
+			c += fmt.Sprintf(" ❝%d/%d", ct.Verbatim(), len(ct.Quotes))
+		}
 	}
 	if st.Checked {
 		if st.Passed {
@@ -650,4 +687,54 @@ func checkSources(got []rag.Hit, want []string) []string {
 		}
 	}
 	return missing
+}
+
+// checkCitation — проверки дня 24: ответ с проверенными цитатами, «не
+// знаю», где ответа в базе нет, и судья смысла. Возвращает промахи
+// и цену вызова судьи.
+func checkCitation(ctx context.Context, a *agent.Agent, l Line, st *Step) ([]string, float64) {
+	c := st.Citation
+	idk := c != nil && (c.Refused || !c.Known)
+	// Вариант без цитат отвечает прозой: «не знаю» ищется в самом тексте.
+	if c == nil {
+		idk = strings.Contains(strings.ToLower(st.Answer), "не знаю")
+	}
+	var miss []string
+	if l.Cited {
+		switch {
+		case c == nil:
+			miss = append(miss, "ответ без цитат")
+		case idk:
+			miss = append(miss, "сказал «не знаю», хотя ответ в базе есть")
+		default:
+			miss = append(miss, c.Problems()...)
+		}
+	}
+	if l.IDK && !idk {
+		miss = append(miss, "не сказал «не знаю»")
+	}
+	// grounded: «не знаю» честно; ответ — только с проверенными цитатами
+	// и согласием судьи, как у cited + judge.
+	if l.Grounded && !idk {
+		if c == nil {
+			miss = append(miss, "ответ без цитат и не «не знаю»")
+		} else if !l.Cited {
+			miss = append(miss, c.Problems()...)
+		}
+	}
+	var cost float64
+	if (l.Judge || l.Grounded) && c != nil && !idk && !c.Malformed {
+		v, spent, err := a.JudgeCitation(ctx, c)
+		cost = spent
+		switch {
+		case err != nil:
+			miss = append(miss, "судья: "+err.Error())
+		case !v.Supported:
+			st.Verdict = v
+			miss = append(miss, "судья: не подтверждено цитатами — "+v.Unsupported)
+		default:
+			st.Verdict = v
+		}
+	}
+	return miss, cost
 }

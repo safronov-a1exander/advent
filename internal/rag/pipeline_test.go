@@ -114,3 +114,14 @@ func TestScoreModes(t *testing.T) {
 		t.Fatalf("сводка режима: %+v", s)
 	}
 }
+
+func TestSelectKeepsRerankScoresOnCandidates(t *testing.T) {
+	rr := fixedReranker{word: "расписанию", high: 0.06, low: 0.01}
+	res, err := Select(context.Background(), rr, "q", cands(), Options{TopK: 3, Rerank: true, MinRerank: 0.1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Kept) != 0 || res.Candidates[1].Rerank != 0.06 {
+		t.Fatalf("оценки реранкера должны остаться у кандидатов, даже если порог не прошёл никто: %+v", res.Candidates)
+	}
+}
