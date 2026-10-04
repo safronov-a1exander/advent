@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/safronov-a1exander/advent/internal/agent"
+	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/task"
 )
@@ -321,8 +322,12 @@ func memoryHeader(a *agent.Agent) string {
 	return "🧠 " + mem.Summary()
 }
 
-// ragCommand включает и выключает поиск по базе знаний (день 22):
-// /rag on, /rag off, /rag без аргумента — переключить.
+// ragCommand управляет поиском по базе знаний (дни 22–23):
+//
+//	/rag on | off     включить или выключить; без аргумента — переключить
+//	/rag rerank       второй этап: 10 кандидатов, реранкер, порог 0.1
+//	/rag plain        обратно в один этап
+//	/rag rewrite      искать по переписанному запросу — включить и выключить
 func (m *Model) ragCommand(arg string) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "on", "вкл":
@@ -335,16 +340,26 @@ func (m *Model) ragCommand(arg string) {
 		} else {
 			m.set.RAG = ""
 		}
+	case "rerank":
+		// значения по умолчанию — из замера дня 23 (advent retrieval)
+		m.set.RAG, m.set.RAGRerank = "on", true
+		m.set.RAGCandidates, m.set.RAGMinRerank = llm.I(10), llm.F(0.1)
+	case "plain":
+		m.set.RAG, m.set.RAGRerank = "on", false
+		m.set.RAGCandidates, m.set.RAGMinRerank = nil, nil
+	case "rewrite":
+		m.set.RAG, m.set.RAGRewrite = "on", !m.set.RAGRewrite
 	default:
-		m.flash = "формат: /rag on | off"
+		m.flash = "формат: /rag on | off | rerank | plain | rewrite"
 		return
 	}
-	m.ag.SetConfig(m.set.AgentConfig())
+	cfg := m.set.AgentConfig()
+	m.ag.SetConfig(cfg)
 	m.pushLine("")
 	if m.set.RAG == "" {
 		m.pushLine(stNote.Render("📚 база знаний выключена — модель отвечает тем, что знает сама"))
 	} else {
-		m.pushLine(stNote.Render("📚 база знаний включена — перед ответом агент ищет фрагменты"))
+		m.pushLine(stNote.Render("📚 " + agent.RAGSummary(cfg)))
 	}
 	m.refresh()
 }

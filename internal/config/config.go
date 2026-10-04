@@ -52,6 +52,8 @@ type Config struct {
 	// облако или заглушка. Отдельно от providers: у них другой эндпоинт
 	// и другая цена, а чат-модель с ними не пересекается.
 	Embedders []rag.EmbedderSpec `yaml:"embedders"`
+	// Rerankers — кросс-энкодеры второго этапа поиска (день 23).
+	Rerankers []rag.RerankerSpec `yaml:"rerankers"`
 	// RAG — база знаний: что индексировать, как резать, где хранить (день 21).
 	RAG RAGConfig `yaml:"rag"`
 }
@@ -131,6 +133,20 @@ func (c *Config) merge(o *Config) {
 	}
 	if o.RAG.Embedder != "" {
 		c.RAG.Embedder = o.RAG.Embedder
+	}
+	if o.RAG.Reranker != "" {
+		c.RAG.Reranker = o.RAG.Reranker
+	}
+	for _, r := range o.Rerankers {
+		replaced := false
+		for i := range c.Rerankers {
+			if c.Rerankers[i].Name == r.Name {
+				c.Rerankers[i], replaced = r, true
+			}
+		}
+		if !replaced {
+			c.Rerankers = append(c.Rerankers, r)
+		}
 	}
 	// модели эмбеддингов из config.local.yaml заменяют одноимённые
 	for _, e := range o.Embedders {
@@ -259,6 +275,8 @@ func (p *Provider) ModelByTier(tier string) (llm.ModelInfo, bool) {
 type RAGConfig struct {
 	// Embedder — имя модели из embedders по умолчанию.
 	Embedder string `yaml:"embedder"`
+	// Reranker — имя реранкера из rerankers по умолчанию (день 23).
+	Reranker string `yaml:"reranker"`
 	// IndexDir — где лежат индексы. Их можно пересобрать из документов,
 	// поэтому каталог в .gitignore, как runs и reports.
 	IndexDir string       `yaml:"index_dir"`
@@ -284,4 +302,23 @@ func (c *Config) Embedder(name string) (*rag.HTTPEmbedder, error) {
 		names = append(names, e.Name)
 	}
 	return nil, fmt.Errorf("модель эмбеддингов %q не найдена в config.yaml (есть: %s)", name, strings.Join(names, ", "))
+}
+
+// Reranker — клиент реранкера по имени; пусто — rag.reranker (день 23).
+func (c *Config) Reranker(name string) (*rag.HTTPReranker, error) {
+	if name == "" {
+		name = c.RAG.Reranker
+	}
+	var names []string
+	for _, r := range c.Rerankers {
+		if r.Name == name {
+			key := ""
+			if r.APIKeyEnv != "" {
+				key = strings.TrimSpace(os.Getenv(r.APIKeyEnv))
+			}
+			return rag.NewHTTPReranker(r, key), nil
+		}
+		names = append(names, r.Name)
+	}
+	return nil, fmt.Errorf("реранкер %q не найден в config.yaml (есть: %s)", name, strings.Join(names, ", "))
 }

@@ -125,6 +125,10 @@ type Line struct {
 	// и только у вариантов с rag: варианту без базы искать негде,
 	// его сравнивают по ответу.
 	Sources []string `yaml:"sources"`
+	// NoSources — ответа в базе нет, и в запрос не должно уйти ни одного
+	// фрагмента (день 23). Посторонний текст в промпте модель принимает
+	// за контекст и строит ответ на нём.
+	NoSources bool `yaml:"no_sources"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -157,7 +161,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || len(l.Sources) > 0
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || len(l.Sources) > 0 || l.NoSources
 }
 
 // Load читает сценарий.
@@ -366,7 +370,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || (len(l.Sources) > 0 && cfg.RAG != ""), Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || ((len(l.Sources) > 0 || l.NoSources) && cfg.RAG != ""), Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -408,6 +412,10 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 				if miss := checkSources(st.Sources, l.Sources); len(miss) > 0 {
 					st.Passed = false
 					st.Missing = append(st.Missing, miss...)
+				}
+				if l.NoSources && len(st.Sources) > 0 {
+					st.Passed = false
+					st.Missing = append(st.Missing, fmt.Sprintf("лишние фрагменты: %d", len(st.Sources)))
 				}
 			}
 			if l.UsesResult && !usesResult(l.Say, st.Answer, st.Tools) {

@@ -85,6 +85,8 @@ func main() {
 
 	// День 21: эмбеддинги для репетиций базы знаний.
 	mux.HandleFunc("/v1/embeddings", handleEmbeddings)
+	// День 23: реранкер для репетиций.
+	mux.HandleFunc("/v1/rerank", handleRerank)
 
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req chatReq
@@ -125,6 +127,8 @@ func main() {
 		var source []string
 		var sep string
 		switch {
+		case rewriteRequest(req.Messages):
+			source, sep = strings.Fields(mockRewrite(req.Messages)), " "
 		case ragRequest(req.Messages):
 			source, sep = strings.Fields(mockRAG(req.Messages)), " "
 		case factsRequest(req.Messages):

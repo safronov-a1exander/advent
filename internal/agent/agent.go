@@ -463,7 +463,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	// День 22: фрагменты базы знаний — до оценки размера: они едут
 	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
-	hits := a.retrieve(ctx, cfg, text, on)
+	hits := a.retrieve(ctx, cfg, hist, text, &turn, on)
 	question := augment(text, hits)
 
 	a.mu.Lock()

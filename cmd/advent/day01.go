@@ -79,6 +79,9 @@ type askFlags struct {
 	// вектор вопроса (пусто — rag.embedder из config.yaml).
 	rag      bool
 	embedder string
+	// ragRerank и ragRewrite — второй этап поиска (день 23).
+	ragRerank  bool
+	ragRewrite bool
 
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
@@ -111,6 +114,8 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
 	fs.StringVar(&a.mcp, "mcp", "", "MCP-серверы из config.yaml через запятую, чьи инструменты выданы агенту (день 17)")
 	fs.BoolVar(&a.rag, "rag", false, "искать ответ в базе знаний (день 22): фрагменты уходят в запрос вместе с вопросом")
+	fs.BoolVar(&a.ragRerank, "rag-rerank", false, "второй этап поиска (день 23): 10 кандидатов, реранкер, порог 0.1; включает -rag")
+	fs.BoolVar(&a.ragRewrite, "rag-rewrite", false, "искать по переписанному моделью запросу (день 23); включает -rag")
 	fs.StringVar(&a.embedder, "embedder", "", "модель эмбеддингов из config.yaml для -rag (пусто — rag.embedder; на провайдере mock — mock)")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
@@ -412,6 +417,9 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 
 	// День 22: база знаний. Индекс читается при первом вопросе с RAG,
 	// поэтому подключается всегда — поиск можно включить и из панели.
+	if a.ragRerank || a.ragRewrite {
+		a.rag = true
+	}
 	kb, err := knowledgeFor(a.cfg, a.embedder, a.provider)
 	switch {
 	case err == nil:
@@ -422,6 +430,10 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	if a.rag {
 		set.RAG = "on"
 	}
+	if a.ragRerank {
+		set.RAGRerank, set.RAGCandidates, set.RAGMinRerank = true, llm.I(10), llm.F(0.1)
+	}
+	set.RAGRewrite = a.ragRewrite
 
 	m := tui.NewModel(opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))

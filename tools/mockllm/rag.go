@@ -29,3 +29,17 @@ func mockRAG(msgs []message) string {
 	}
 	return "По фрагменту [1]: " + strings.Join(words, " ") + " …"
 }
+
+// День 23: служебный вызов «переписать запрос». Заглушка переписывать
+// не умеет и честно возвращает сам вопрос — поиск идёт по нему.
+func rewriteRequest(msgs []message) bool {
+	return len(msgs) > 0 && msgs[0].Role == "system" && strings.HasPrefix(msgs[0].Content, "Ты переписываешь вопрос")
+}
+
+func mockRewrite(msgs []message) string {
+	text := msgs[lastUser(msgs)].Content
+	if i := strings.LastIndex(text, "Вопрос: "); i >= 0 {
+		return strings.TrimSpace(text[i+len("Вопрос: "):])
+	}
+	return text
+}

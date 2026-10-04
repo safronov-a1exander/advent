@@ -90,6 +90,16 @@ type Config struct {
 	RAG string `yaml:"rag" json:"rag,omitempty"`
 	// RAGTopK — сколько фрагментов уходит в запрос; nil — DefaultRAGTopK.
 	RAGTopK *int `yaml:"rag_k" json:"rag_k,omitempty"`
+	// Второй этап поиска (день 23). RAGCandidates — сколько кандидатов
+	// берёт первый этап (nil — столько же, сколько rag_k); RAGMinScore —
+	// порог косинуса; RAGRerank — переоценить кандидатов кросс-энкодером;
+	// RAGMinRerank — порог его оценки (0…1); RAGRewrite — искать не по
+	// вопросу, а по его переписанной моделью форме.
+	RAGCandidates *int     `yaml:"rag_candidates" json:"rag_candidates,omitempty"`
+	RAGMinScore   *float64 `yaml:"rag_min_score" json:"rag_min_score,omitempty"`
+	RAGRerank     bool     `yaml:"rag_rerank" json:"rag_rerank,omitempty"`
+	RAGMinRerank  *float64 `yaml:"rag_min_rerank" json:"rag_min_rerank,omitempty"`
+	RAGRewrite    bool     `yaml:"rag_rewrite" json:"rag_rewrite,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -125,6 +135,15 @@ func (c Config) Clone() Config {
 	}
 	if c.RAGTopK != nil {
 		out.RAGTopK = llm.I(*c.RAGTopK)
+	}
+	if c.RAGCandidates != nil {
+		out.RAGCandidates = llm.I(*c.RAGCandidates)
+	}
+	if c.RAGMinScore != nil {
+		out.RAGMinScore = llm.F(*c.RAGMinScore)
+	}
+	if c.RAGMinRerank != nil {
+		out.RAGMinRerank = llm.F(*c.RAGMinRerank)
 	}
 	return out
 }
@@ -234,7 +253,7 @@ func (c Config) Summary() string {
 		parts = append(parts, mcpSummary(c.MCP))
 	}
 	if c.RAG != "" {
-		parts = append(parts, fmt.Sprintf("RAG: %d фрагм.", c.ragTopK()))
+		parts = append(parts, RAGSummary(c))
 	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
@@ -332,6 +351,21 @@ func overlay(base, top Config) Config {
 	}
 	if top.RAGTopK != nil {
 		out.RAGTopK = llm.I(*top.RAGTopK)
+	}
+	if top.RAGCandidates != nil {
+		out.RAGCandidates = llm.I(*top.RAGCandidates)
+	}
+	if top.RAGMinScore != nil {
+		out.RAGMinScore = llm.F(*top.RAGMinScore)
+	}
+	if top.RAGRerank {
+		out.RAGRerank = true
+	}
+	if top.RAGMinRerank != nil {
+		out.RAGMinRerank = llm.F(*top.RAGMinRerank)
+	}
+	if top.RAGRewrite {
+		out.RAGRewrite = true
 	}
 	return out
 }
