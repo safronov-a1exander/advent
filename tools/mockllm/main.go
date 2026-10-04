@@ -83,6 +83,9 @@ func main() {
 		}})
 	})
 
+	// День 21: эмбеддинги для репетиций базы знаний.
+	mux.HandleFunc("/v1/embeddings", handleEmbeddings)
+
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req chatReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

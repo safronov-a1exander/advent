@@ -157,3 +157,44 @@ mcp_servers:
   - name: gitmcp
     url: https://gitmcp.io/docs
     description: документация любого GitHub-проекта; выдаёт сессию
+
+# Модели эмбеддингов (день 21): текст → вектор. Отдельно от providers —
+# у них свой эндпоинт /v1/embeddings, и чат-модели к ним отношения не имеют.
+# Локальный сервер поднимает scripts/rag-servers.ps1 (llama.cpp на GPU);
+# Ollama отдаёт тот же /v1/embeddings — достаточно поменять base_url и model.
+embedders:
+  - name: bge-m3
+    base_url: http://127.0.0.1:8081/v1
+    model: bge-m3
+    batch: 8
+    description: BAAI bge-m3, 1024 измерения, многоязычная — русский понимает
+  # Заглушка `go run ./tools/mockllm`: векторы из хэшей слов. Смысла не
+  # понимает, но одинаковые слова сближает — для репетиций хватает.
+  - name: mock
+    base_url: http://127.0.0.1:8099/v1
+    model: mock-embed
+    batch: 64
+    description: заглушка — хэши слов вместо смысла
+
+# База знаний (день 21): документы стенда, которых модель никогда не видела.
+# Заметки дней 21+ в базу не входят — в них контрольные вопросы с ответами,
+# и поиск находил бы шпаргалку вместо источника.
+rag:
+  embedder: bge-m3
+  index_dir: index
+  strategy: structure
+  sources:
+    include:
+      - README.md
+      - docs/RUNBOOK.md
+      - docs/days/day0?.md
+      - docs/days/day1?.md
+      - docs/days/day20.md
+      - internal/servers/**/*.go
+    exclude:
+      - "**/*_test.go"
+  chunking:
+    size: 1200     # fixed: окно в символах
+    overlap: 200   # fixed: перекрытие соседних окон
+    max: 1800      # structure: раздел длиннее — делится по абзацам
+    min: 250       # structure: кусок короче — склеивается со следующим
