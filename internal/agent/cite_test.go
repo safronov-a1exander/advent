@@ -130,3 +130,52 @@ func TestCiteWithNothingAboveThresholdSaysIDontKnowWithoutModel(t *testing.T) {
 		t.Fatal("«не знаю» — обычный ход разговора и ложится в историю")
 	}
 }
+
+// routeLLM: на rewrite отвечает NONE, на остальное — «цель: X».
+type routeLLM struct{ rewrites atomic.Int32 }
+
+func (r *routeLLM) Name() string                                 { return "route" }
+func (r *routeLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (r *routeLLM) ChatStream(ctx context.Context, q llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return r.Chat(ctx, q)
+}
+func (r *routeLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
+	if strings.HasPrefix(q.Messages[0].Content, "Ты переписываешь вопрос") {
+		r.rewrites.Add(1)
+		if !strings.Contains(q.Messages[1].Content, "Память задачи:") {
+			return &llm.Response{Content: "память задачи не дошла до rewrite"}, nil
+		}
+		return &llm.Response{Content: "NONE."}, nil
+	}
+	return &llm.Response{Content: "Цель — повторить замер дня 20."}, nil
+}
+
+type countKB struct{ calls atomic.Int32 }
+
+func (c *countKB) Retrieve(_ context.Context, q string, _ rag.Options) (*rag.Result, error) {
+	c.calls.Add(1)
+	return &rag.Result{Query: q}, nil
+}
+
+func TestRewriteNoneSkipsSearchAndNamesConversationAsSource(t *testing.T) {
+	llmc, kb := &routeLLM{}, &countKB{}
+	p := NewPool(llmc, "route", nil)
+	p.SetKnowledge(kb)
+	a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGRewrite: true, RAGCite: true, Memory: "manual", Task: "t"})
+	if err := a.Remember("task", "цель", "повторить замер дня 20"); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := a.Ask(context.Background(), "напомни, какая у нас цель?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kb.calls.Load() != 0 {
+		t.Fatal("вопрос о разговоре не должен идти в базу")
+	}
+	if !strings.Contains(reply.Final.Content, "повторить замер") || !strings.HasSuffix(reply.Final.Content, ConversationSource) {
+		t.Fatalf("ответ по памяти с подписью источника, а не «не знаю»: %q", reply.Final.Content)
+	}
+	if reply.Citation != nil {
+		t.Fatal("без поиска нечего цитировать — режим цитат не включается")
+	}
+}

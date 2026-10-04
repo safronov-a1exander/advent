@@ -466,7 +466,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	// День 22: фрагменты базы знаний — до оценки размера: они едут
 	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
-	found := a.retrieve(ctx, cfg, hist, text, &turn, on)
+	found, skipped := a.retrieve(ctx, cfg, mem, hist, text, &turn, on)
 	var hits []rag.Hit
 	if found != nil {
 		hits = found.Kept
@@ -576,6 +576,13 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// День 14: ответ проверяется на инварианты и при нарушении переписывается.
 	// До продвижения задачи: двигать стадию по ответу, который пользователь
 	// не увидит, неправильно.
+	// День 25: в базе не искали — вопрос о самом разговоре. Источник
+	// всё равно называется: разговор и память задачи.
+	if skipped {
+		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + ConversationSource
+		on(Event{Kind: EventChunk, Content: "\n\n" + ConversationSource})
+	}
+
 	// День 24: JSON с источниками и цитатами — в текст для человека,
 	// с итогом проверки кодом. До инвариантов: проверяться должно то,
 	// что увидит пользователь.

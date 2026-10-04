@@ -40,7 +40,11 @@ func rewriteRequest(msgs []message) bool {
 func mockRewrite(msgs []message) string {
 	text := msgs[lastUser(msgs)].Content
 	if i := strings.LastIndex(text, "Вопрос: "); i >= 0 {
-		return strings.TrimSpace(text[i+len("Вопрос: "):])
+		q := strings.TrimSpace(text[i+len("Вопрос: "):])
+		if aboutChatRe.MatchString(q) {
+			return "NONE"
+		}
+		return q
 	}
 	return text
 }
@@ -74,3 +78,6 @@ func mockCite(msgs []message) string {
 	})
 	return string(b)
 }
+
+// День 25: вопрос о самом разговоре — искать в базе нечего.
+var aboutChatRe = regexp.MustCompile(`(?i)напомни|спасибо|что мы (уже )?(решили|выяснили)|какая у нас цель`)

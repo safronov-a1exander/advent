@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,9 @@ type Index struct {
 	Chunks []Entry  `json:"chunks"`
 	// Tokens — сколько токенов ушло на эмбеддинги при сборке.
 	Tokens int `json:"tokens"`
+
+	posOnce sync.Once
+	pos     map[string]int
 }
 
 // Entry — чанк и его вектор.
@@ -91,6 +95,9 @@ type Hit struct {
 	Rank int `json:"rank,omitempty"`
 	// Rerank — оценка реранкера, 0…1; 0 — реранкер не смотрел (день 23).
 	Rerank float32 `json:"rerank,omitempty"`
+	// Parts — из каких чанков собран фрагмент, если он расширен до раздела
+	// (день 25).
+	Parts []string `json:"parts,omitempty"`
 }
 
 // Search — k ближайших по косинусу чанков.

@@ -52,7 +52,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → day-24 → …
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → day-24 → day-25 → …
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -85,6 +85,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 22 | `day-22` | первый RAG-запрос: поиск → фрагменты с вопросом → LLM, десять контрольных вопросов с RAG и без | `docs/days/day22.md` |
 | 23 | `day-23` | реранкинг и фильтрация: кандидаты → порог → кросс-энкодер → top-K, rewrite, сравнение режимов | `docs/days/day23.md` |
 | 24 | `day-24` | цитаты и источники: ответ JSON-ом, сверка цитат кодом, судья смысла, «не знаю» без модели | `docs/days/day24.md` |
+| 25 | `day-25` | мини-чат с RAG и памятью задачи: маршрут «база или разговор», раздел целиком, два длинных сценария | `docs/days/day25.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
@@ -105,7 +106,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | одиночный запрос | `advent ask "вопрос"` | — |
 | сводка по расписанию | `advent mcp-server rates -http 127.0.0.1:8765` и `advent watch -every 5m` (или `-once` из cron) | — |
 | MCP-серверы | `advent mcp`, `advent mcp -server gitmcp -wire`, `advent mcp -url <адрес>`, `advent mcp -server rates -call convert -args '{…}'` · свой сервер `advent mcp-server rates` | — |
-| база знаний | `advent index` (оба индекса и сравнение нарезки), `advent index -dry -source <файл> -show N`, `advent search "вопрос"` · модель эмбеддингов — `scripts/rag-servers.ps1` · чат с базой — `advent chat -rag` · режимы поиска рядом — `advent retrieval` · оценки реранкера — `advent search -rerank "вопрос"` | — |
+| база знаний | `advent index` (оба индекса и сравнение нарезки), `advent index -dry -source <файл> -show N`, `advent search "вопрос"` · модель эмбеддингов — `scripts/rag-servers.ps1` · чат с базой — `advent chat -rag` · режимы поиска рядом — `advent retrieval` · оценки реранкера — `advent search -rerank "вопрос"` · мини-чат — `advent chat -rag-chat -task <id> -context window -keep-last 4` | — |
 
 В панели: `↑↓` — поле, `←→` — значение, `Enter` — ввести вручную
 (старое значение затирается), `Esc` — отмена.
@@ -142,6 +143,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | день 22 | `база знаний` и `фрагментов` (`rag`, `rag_k`); `/rag on` и `/rag off` из поля ввода; флаги `-rag`, `-embedder`; в сценарии — проверка `sources` |
 | день 23 | `кандидатов`, `реранк`, `порог реранка`, `rewrite` (`rag_candidates`, `rag_min_score`, `rag_rerank`, `rag_min_rerank`, `rag_rewrite`); `/rag rerank`, `/rag plain`, `/rag rewrite`; флаги `-rag-rerank`, `-rag-rewrite`; в сценарии — проверка `no_sources` |
 | день 24 | `цитаты` (`rag_cite`); `/rag cite`; флаг `-rag-cite`; в сценарии — проверки `cited`, `judge`, `idk`, `grounded` |
+| день 25 | `раздел целиком` (`rag_expand`); `/rag expand`; флаг `-rag-chat` — мини-чат одним флагом (с `-task` — и память задачи); rewrite отвечает `NONE` на вопросы о самом разговоре |
 
 В экране `lab` панель работает **слоем поверх YAML-сценария**: пустое поле
 означает «как в сценарии», заполненное навязывается всем вариантам сразу.

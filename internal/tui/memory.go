@@ -350,11 +350,14 @@ func (m *Model) ragCommand(arg string) {
 		m.set.RAGCandidates, m.set.RAGMinRerank = nil, nil
 	case "rewrite":
 		m.set.RAG, m.set.RAGRewrite = "on", !m.set.RAGRewrite
+	case "expand":
+		// День 25: раздел целиком вместо найденного куска.
+		m.set.RAG, m.set.RAGExpand = "on", !m.set.RAGExpand
 	case "cite":
 		// День 24: источники и цитаты с проверкой, «не знаю» при пустом поиске.
 		m.set.RAG, m.set.RAGCite = "on", !m.set.RAGCite
 	default:
-		m.flash = "формат: /rag on | off | rerank | plain | rewrite | cite"
+		m.flash = "формат: /rag on | off | rerank | plain | rewrite | cite | expand"
 		return
 	}
 	cfg := m.set.AgentConfig()
