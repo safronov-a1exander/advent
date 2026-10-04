@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Options — как отбирать фрагменты для запроса (день 23).
@@ -26,6 +27,8 @@ type Options struct {
 	Rerank bool
 	// MinRerank — порог реранкера (вероятность 0…1). 0 — без порога.
 	MinRerank float32
+	// Expand — отдать в запрос раздел целиком, а не найденный кусок (день 25).
+	Expand bool
 }
 
 // Result — что нашлось и что из этого отобрано.
@@ -101,5 +104,85 @@ func Search(ctx context.Context, ix *Index, emb Embedder, rr Reranker, query str
 	if err != nil {
 		return nil, err
 	}
-	return Select(ctx, rr, query, cands, o)
+	res, err := Select(ctx, rr, query, cands, o)
+	if err != nil {
+		return nil, err
+	}
+	if o.Expand {
+		res.Kept = expandAll(ix, res.Kept)
+	}
+	return res, nil
+}
+
+// Expand — фрагмент вместе с соседними кусками того же раздела (день 25).
+//
+// Длинный раздел нарезка делит по абзацам, и таблица с числами может
+// оказаться в одном чанке, а выводы по ней — в соседнем. Поиск находит
+// выводы (их текст ближе к вопросу), а числа остаются за бортом: на
+// двадцать пятом дне так потерялась цена прогона из таблицы дня 20 —
+// реранкер дал таблице 0.07, абзацу под ней 0.58. Ищем по маленьким
+// кускам, в запрос отдаём раздел целиком — «small-to-big».
+//
+// Только для нарезки по структуре: у fixed соседние окна перекрываются
+// и раздела в метаданных честно не знают.
+func (ix *Index) Expand(h Hit) Hit {
+	if ix.Strategy != Structure {
+		return h
+	}
+	i := ix.position(h.ID)
+	if i < 0 {
+		return h
+	}
+	same := func(j int) bool {
+		c := ix.Chunks[j]
+		return c.Source == h.Source && c.Section == h.Section
+	}
+	lo, hi := i, i
+	for lo > 0 && same(lo-1) {
+		lo--
+	}
+	for hi+1 < len(ix.Chunks) && same(hi+1) {
+		hi++
+	}
+	if lo == hi {
+		return h
+	}
+	parts := make([]string, 0, hi-lo+1)
+	for j := lo; j <= hi; j++ {
+		parts = append(parts, ix.Chunks[j].Text)
+		h.Parts = append(h.Parts, ix.Chunks[j].ID)
+	}
+	h.Text = strings.Join(parts, "\n\n")
+	h.Start, h.End = ix.Chunks[lo].Start, ix.Chunks[hi].End
+	return h
+}
+
+func (ix *Index) position(id string) int {
+	ix.posOnce.Do(func() {
+		ix.pos = make(map[string]int, len(ix.Chunks))
+		for i, c := range ix.Chunks {
+			ix.pos[c.ID] = i
+		}
+	})
+	if i, ok := ix.pos[id]; ok {
+		return i
+	}
+	return -1
+}
+
+// expandAll расширяет отобранные фрагменты; два куска одного раздела
+// становятся одним фрагментом — на месте первого.
+func expandAll(ix *Index, kept []Hit) []Hit {
+	var out []Hit
+	seen := map[string]bool{}
+	for _, h := range kept {
+		e := ix.Expand(h)
+		key := e.Source + "\x00" + e.Section + "\x00" + fmt.Sprint(e.Start)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	return out
 }

@@ -125,3 +125,36 @@ func TestSelectKeepsRerankScoresOnCandidates(t *testing.T) {
 		t.Fatalf("оценки реранкера должны остаться у кандидатов, даже если порог не прошёл никто: %+v", res.Candidates)
 	}
 }
+
+func TestExpandJoinsSectionParts(t *testing.T) {
+	text := "# T\n\n## Живой API\n\n| вариант | $ |\n|---|---|\n| три сервера | 0.00093 |\n\n" + strings.Repeat("Вывод по таблице. ", 60) + "\n\n## Ключевые файлы\n\nфайлы\n"
+	d := newDocument("day20.md", text)
+	emb := wordEmbedder{vocab: []string{"вывод", "таблиц", "файлы"}}
+	ix, err := Build(context.Background(), []Document{d}, Structure, Chunking{Max: 400, Min: 20}, emb, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tail Hit
+	for _, c := range ix.Chunks {
+		if c.Section == "Живой API" && !strings.Contains(c.Text, "0.00093") {
+			tail = Hit{Chunk: c.Chunk}
+		}
+	}
+	if tail.ID == "" {
+		t.Fatal("раздел не поделился — тест ничего не проверяет")
+	}
+	got := ix.Expand(tail)
+	if !strings.Contains(got.Text, "0.00093") || len(got.Parts) < 2 || strings.Contains(got.Text, "файлы") {
+		t.Fatalf("раздел целиком, без соседнего раздела: parts=%v", got.Parts)
+	}
+	// два куска одного раздела — один фрагмент
+	head := Hit{Chunk: ix.Chunks[ix.position(got.Parts[0])].Chunk}
+	if out := expandAll(ix, []Hit{tail, head}); len(out) != 1 {
+		t.Fatalf("куски одного раздела должны слиться: %d", len(out))
+	}
+	// у fixed соседние окна перекрываются — не расширяем
+	ix.Strategy = Fixed
+	if e := ix.Expand(tail); len(e.Parts) != 0 {
+		t.Fatal("fixed не расширяется")
+	}
+}

@@ -103,6 +103,9 @@ type Config struct {
 	// RAGCite — отвечать JSON с источниками и дословными цитатами, которые
 	// проверяет код, а при пустом поиске — «не знаю» без модели (день 24).
 	RAGCite bool `yaml:"rag_cite" json:"rag_cite,omitempty"`
+	// RAGExpand — отдавать в запрос раздел целиком, а не найденный кусок:
+	// таблица и выводы по ней, разрезанные нарезкой, едут вместе (день 25).
+	RAGExpand bool `yaml:"rag_expand" json:"rag_expand,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -372,6 +375,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.RAGCite {
 		out.RAGCite = true
+	}
+	if top.RAGExpand {
+		out.RAGExpand = true
 	}
 	return out
 }

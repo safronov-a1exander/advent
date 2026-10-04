@@ -84,6 +84,9 @@ type askFlags struct {
 	ragRewrite bool
 	// ragCite — источники и цитаты с проверкой (день 24).
 	ragCite bool
+	// ragChat — мини-чат дня 25: всё сразу — реранк, rewrite, цитаты,
+	// раздел целиком и, если задана -task, память задачи.
+	ragChat bool
 
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
@@ -118,6 +121,7 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.BoolVar(&a.rag, "rag", false, "искать ответ в базе знаний (день 22): фрагменты уходят в запрос вместе с вопросом")
 	fs.BoolVar(&a.ragRerank, "rag-rerank", false, "второй этап поиска (день 23): 10 кандидатов, реранкер, порог 0.1; включает -rag")
 	fs.BoolVar(&a.ragRewrite, "rag-rewrite", false, "искать по переписанному моделью запросу (день 23); включает -rag")
+	fs.BoolVar(&a.ragChat, "rag-chat", false, "мини-чат с базой знаний (день 25): реранк, rewrite, цитаты, раздел целиком; с -task — ещё и память задачи (-memory auto)")
 	fs.BoolVar(&a.ragCite, "rag-cite", false, "ответ с источниками и дословными цитатами, «не знаю» при пустом поиске (день 24); включает -rag")
 	fs.StringVar(&a.embedder, "embedder", "", "модель эмбеддингов из config.yaml для -rag (пусто — rag.embedder; на провайдере mock — mock)")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
@@ -420,6 +424,15 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 
 	// День 22: база знаний. Индекс читается при первом вопросе с RAG,
 	// поэтому подключается всегда — поиск можно включить и из панели.
+	if a.ragChat {
+		a.ragRerank, a.ragRewrite, a.ragCite = true, true, true
+		// Память задачи — главное усиление дня 25. Режим памяти уже лёг
+		// в панель выше, поэтому ставится и туда.
+		if a.memoryTask != "" && a.memoryMode == "" {
+			a.memoryMode = agent.MemoryAuto
+			set.Memory = a.memoryMode
+		}
+	}
 	if a.ragRerank || a.ragRewrite || a.ragCite {
 		a.rag = true
 	}
@@ -438,6 +451,7 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	}
 	set.RAGRewrite = a.ragRewrite
 	set.RAGCite = a.ragCite
+	set.RAGExpand = a.ragChat
 
 	m := tui.NewModel(opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))

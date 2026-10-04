@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/rag"
 )
 
@@ -63,28 +64,54 @@ func (p *Pool) SetKnowledge(k Knowledge) {
 // С rag_rewrite искать идут не по вопросу, а по его переписанной форме
 // (день 23): служебный вызов модели раскрывает отсылки к прошлым репликам
 // и называет термины, которыми это могло быть записано в документах.
-func (a *Agent) retrieve(ctx context.Context, cfg Config, hist []llm.Message, text string, turn *Turn, on func(Event)) *rag.Result {
+func (a *Agent) retrieve(ctx context.Context, cfg Config, mem *memory.Memory, hist []llm.Message, text string, turn *Turn, on func(Event)) (res *rag.Result, skipped bool) {
 	if cfg.RAG == "" {
-		return nil
+		return nil, false
 	}
 	a.mu.Lock()
 	kb := a.knowledge
 	a.mu.Unlock()
 	if kb == nil {
 		on(Event{Kind: EventRetrieval, Label: "база знаний не подключена", Failed: true})
-		return nil
+		return nil, false
 	}
 	query := text
 	if cfg.RAGRewrite {
-		query = a.rewriteQuery(ctx, cfg, hist, text, turn, on)
+		query = a.rewriteQuery(ctx, cfg, taskMemo(mem), hist, text, turn, on)
+		// День 25: вопрос о самом разговоре — «напомни цель», «что мы
+		// решили», «спасибо». В базе его ответа нет и быть не может,
+		// а «не знаю» дня 24 на него было бы неправдой: ответ — в памяти.
+		if query == NoSearch {
+			on(Event{Kind: EventRetrieval, Label: "поиск не нужен: вопрос о самом разговоре — отвечаю по памяти и истории"})
+			return nil, true
+		}
 	}
 	res, err := kb.Retrieve(ctx, query, cfg.ragOptions())
 	if err != nil {
 		on(Event{Kind: EventRetrieval, Label: "база знаний недоступна", Content: err.Error(), Failed: true})
-		return nil
+		return nil, false
 	}
 	on(Event{Kind: EventRetrieval, Label: retrievalLabel(cfg, res), Content: HitTrace(res.Kept)})
-	return res
+	return res, false
+}
+
+// NoSearch — ответ rewrite, когда искать в базе нечего (день 25).
+const NoSearch = "NONE"
+
+// ConversationSource — подпись источника у ответа, для которого в базе
+// не искали: «всегда выводить источники» значит и здесь сказать, откуда
+// ответ (день 25).
+const ConversationSource = "Источник: разговор и память задачи — в базе знаний не искали."
+
+// taskMemo — рабочий слой памяти строками «ключ: значение»: с ним rewrite
+// раскрывает «а сколько это стоит?» через цель задачи, а не только через
+// четыре последние реплики (день 25).
+func taskMemo(m *memory.Memory) string {
+	var lines []string
+	for _, e := range m.Layer(memory.ScopeTask).Entries() {
+		lines = append(lines, e.Key+": "+e.Value)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // retrievalLabel — что сделали этапы поиска: «база знаний: 10 кандидатов →
@@ -122,6 +149,9 @@ func HitTrace(hits []rag.Hit) string {
 			}
 		}
 		s += " " + h.ID
+		if len(h.Parts) > 1 {
+			s += fmt.Sprintf(" (+%d части раздела)", len(h.Parts)-1)
+		}
 		if h.Section != "" {
 			s += " · " + h.Section
 		}
@@ -164,7 +194,7 @@ func RAGHint(mode string) string {
 
 // ragOptions — как отбирать фрагменты по конфигу.
 func (c Config) ragOptions() rag.Options {
-	o := rag.Options{TopK: c.ragTopK(), Rerank: c.RAGRerank}
+	o := rag.Options{TopK: c.ragTopK(), Rerank: c.RAGRerank, Expand: c.RAGExpand}
 	if c.RAGCandidates != nil {
 		o.Candidates = *c.RAGCandidates
 	}
@@ -196,6 +226,9 @@ func RAGSummary(c Config) string {
 	if c.RAGRewrite {
 		s += ", rewrite"
 	}
+	if c.RAGExpand {
+		s += ", раздел целиком"
+	}
 	if c.RAGCite {
 		s += ", цитаты"
 	}
@@ -218,14 +251,19 @@ const rewriteSystem = `Ты переписываешь вопрос пользо
 Верни одну строку — запрос, без пояснений и кавычек. Не отвечай на вопрос.
 - Сохрани смысл вопроса и все его ключевые слова.
 - Раскрой отсылки к прошлым репликам: «это», «там», «а во втором случае» — назови прямо, о чём речь.
+- Если вопрос продолжает разговор, а в нём не названо, о чём речь (какой день, сервер, замер), — добавь это из памяти задачи или прошлых реплик. Только предмет вопроса: цель задачи, ограничения и пожелания пользователя в запрос не переноси — по ним в базе ищется не то.
 - Можно добавить один-два синонима к ключевому слову, если уверен в них.
 - Не добавляй ни фактов, ни чисел, ни тем, которых нет в вопросе и в прошлых репликах.
-- Если вопрос понятен сам по себе, верни его почти без изменений.`
+- Если вопрос понятен сам по себе, верни его почти без изменений.
+- Если сообщение не требует поиска в базе — оно о самом разговоре («напомни цель», «что мы уже решили», «какие ограничения я назвал»), приветствие или благодарность, — верни ровно NONE.`
 
 // RewriteQuery — служебный вызов: вопрос → поисковый запрос. Общий для
 // агента и для команды сравнения режимов поиска.
-func RewriteQuery(ctx context.Context, client llm.Provider, model string, hist []llm.Message, text string) (string, llm.Request, *llm.Response, error) {
+func RewriteQuery(ctx context.Context, client llm.Provider, model, memo string, hist []llm.Message, text string) (string, llm.Request, *llm.Response, error) {
 	var b strings.Builder
+	if memo != "" {
+		b.WriteString("Память задачи:\n" + memo + "\n\n")
+	}
 	if tail := lastMessages(hist, 4); len(tail) > 0 {
 		b.WriteString("Предыдущие реплики:\n")
 		for _, m := range tail {
@@ -252,17 +290,20 @@ func RewriteQuery(ctx context.Context, client llm.Provider, model string, hist [
 	if err != nil {
 		return text, req, resp, err
 	}
-	q := strings.Trim(strings.TrimSpace(oneLineText(resp.Content)), "«»\"")
+	q := strings.Trim(strings.TrimSpace(oneLineText(resp.Content)), "«»\".")
 	if q == "" {
 		q = text
+	}
+	if strings.EqualFold(q, NoSearch) {
+		q = NoSearch
 	}
 	return q, req, resp, nil
 }
 
 // rewriteQuery — то же внутри хода: в журнал, в учёт и в ленту. Сбой
 // не ломает ход — ищем по самому вопросу.
-func (a *Agent) rewriteQuery(ctx context.Context, cfg Config, hist []llm.Message, text string, turn *Turn, on func(Event)) string {
-	q, req, resp, err := RewriteQuery(ctx, a.client, cfg.Model, hist, text)
+func (a *Agent) rewriteQuery(ctx context.Context, cfg Config, memo string, hist []llm.Message, text string, turn *Turn, on func(Event)) string {
+	q, req, resp, err := RewriteQuery(ctx, a.client, cfg.Model, memo, hist, text)
 	a.record(req, resp, err, "переписать запрос", true)
 	a.accountAux(resp, err)
 	if err != nil {

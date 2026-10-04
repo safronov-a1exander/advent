@@ -68,6 +68,8 @@ type Settings struct {
 	RAGRewrite    bool
 	// День 24 — источники, цитаты и «не знаю».
 	RAGCite bool
+	// День 25 — раздел целиком вместо найденного куска.
+	RAGExpand bool
 
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
@@ -391,7 +393,12 @@ func (s *Settings) Fields() []Field {
 			BoolField("цитаты",
 				"ответ JSON-ом с источниками и дословными цитатами, которые проверяет код; ничего не прошло порог — «не знаю» без модели",
 				func() bool { return s.RAGCite },
-				func(v bool) { s.RAGCite = v }))
+				func(v bool) { s.RAGCite = v }),
+			// День 25.
+			BoolField("раздел целиком",
+				"в запрос идёт весь раздел, куски которого нашлись: таблица и выводы по ней, разрезанные нарезкой, — вместе",
+				func() bool { return s.RAGExpand },
+				func(v bool) { s.RAGExpand = v }))
 	}
 
 	if s.Overlay {
@@ -495,6 +502,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		RAGMinRerank:   s.RAGMinRerank,
 		RAGRewrite:     s.RAGRewrite,
 		RAGCite:        s.RAGCite,
+		RAGExpand:      s.RAGExpand,
 	}.Clone()
 }
 
@@ -533,6 +541,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.RAGMinRerank = c.RAGMinRerank
 	s.RAGRewrite = c.RAGRewrite
 	s.RAGCite = c.RAGCite
+	s.RAGExpand = c.RAGExpand
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

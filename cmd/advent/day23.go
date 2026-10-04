@@ -83,7 +83,7 @@ func cmdRetrieval(ctx context.Context, args []string) error {
 		var in, out int
 		var cost float64
 		for i, pr := range ps.Probes {
-			q, _, resp, err := agent.RewriteQuery(ctx, client, m, nil, pr.Q)
+			q, _, resp, err := agent.RewriteQuery(ctx, client, m, "", nil, pr.Q)
 			if err != nil {
 				return fmt.Errorf("переписать запрос: %w", err)
 			}
