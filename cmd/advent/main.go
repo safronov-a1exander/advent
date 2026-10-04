@@ -47,6 +47,8 @@ func usage() {
   mcp       подключиться к MCP-серверам и показать инструменты (день 16)
   mcp-server свой MCP-сервер стенда: rates (stdio или -http)   (день 17–18)
   watch     агент сам присылает сводку по расписанию          (день 18)
+  index     база знаний: нарезка, эмбеддинги, индекс         (день 21)
+  search    ближайшие к вопросу чанки из индекса             (день 21)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -99,6 +101,10 @@ func run() error {
 		return cmdMCPServer(ctx, args)
 	case "watch":
 		return cmdWatch(ctx, args)
+	case "index":
+		return cmdIndex(ctx, args)
+	case "search":
+		return cmdSearch(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

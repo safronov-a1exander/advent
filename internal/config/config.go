@@ -11,6 +11,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/mcp"
+	"github.com/safronov-a1exander/advent/internal/rag"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,6 +48,12 @@ type Config struct {
 	// MCPServers — MCP-серверы, к которым умеет подключаться стенд (день 16):
 	// удалённые по адресу, локальные по команде запуска.
 	MCPServers []mcp.Spec `yaml:"mcp_servers"`
+	// Embedders — модели эмбеддингов (день 21): локальный llama.cpp, Ollama,
+	// облако или заглушка. Отдельно от providers: у них другой эндпоинт
+	// и другая цена, а чат-модель с ними не пересекается.
+	Embedders []rag.EmbedderSpec `yaml:"embedders"`
+	// RAG — база знаний: что индексировать, как резать, где хранить (день 21).
+	RAG RAGConfig `yaml:"rag"`
 }
 
 var ErrNoKey = errors.New("не найден API-ключ")
@@ -92,6 +99,12 @@ func Load(dir string) (*Config, error) {
 	if cfg.SessionsDir == "" {
 		cfg.SessionsDir = filepath.Join(dir, "sessions")
 	}
+	if cfg.RAG.IndexDir == "" {
+		cfg.RAG.IndexDir = filepath.Join(dir, "index")
+	}
+	if cfg.RAG.Strategy == "" {
+		cfg.RAG.Strategy = rag.Structure
+	}
 	return cfg, nil
 }
 
@@ -115,6 +128,21 @@ func (c *Config) merge(o *Config) {
 	}
 	if o.SessionsDir != "" {
 		c.SessionsDir = o.SessionsDir
+	}
+	if o.RAG.Embedder != "" {
+		c.RAG.Embedder = o.RAG.Embedder
+	}
+	// модели эмбеддингов из config.local.yaml заменяют одноимённые
+	for _, e := range o.Embedders {
+		replaced := false
+		for i := range c.Embedders {
+			if c.Embedders[i].Name == e.Name {
+				c.Embedders[i], replaced = e, true
+			}
+		}
+		if !replaced {
+			c.Embedders = append(c.Embedders, e)
+		}
 	}
 	// MCP-серверы из config.local.yaml заменяют одноимённые целиком,
 	// а новые добавляются: так можно подставить свой адрес или заголовок
@@ -225,4 +253,35 @@ func (p *Provider) ModelByTier(tier string) (llm.ModelInfo, bool) {
 		}
 	}
 	return llm.ModelInfo{}, false
+}
+
+// RAGConfig — база знаний стенда (день 21).
+type RAGConfig struct {
+	// Embedder — имя модели из embedders по умолчанию.
+	Embedder string `yaml:"embedder"`
+	// IndexDir — где лежат индексы. Их можно пересобрать из документов,
+	// поэтому каталог в .gitignore, как runs и reports.
+	IndexDir string       `yaml:"index_dir"`
+	Sources  rag.Sources  `yaml:"sources"`
+	Chunking rag.Chunking `yaml:"chunking"`
+	Strategy rag.Strategy `yaml:"strategy"`
+}
+
+// Embedder — клиент эмбеддингов по имени; пусто — rag.embedder.
+func (c *Config) Embedder(name string) (*rag.HTTPEmbedder, error) {
+	if name == "" {
+		name = c.RAG.Embedder
+	}
+	var names []string
+	for _, e := range c.Embedders {
+		if e.Name == name {
+			key := ""
+			if e.APIKeyEnv != "" {
+				key = strings.TrimSpace(os.Getenv(e.APIKeyEnv))
+			}
+			return rag.NewHTTPEmbedder(e, key), nil
+		}
+		names = append(names, e.Name)
+	}
+	return nil, fmt.Errorf("модель эмбеддингов %q не найдена в config.yaml (есть: %s)", name, strings.Join(names, ", "))
 }
