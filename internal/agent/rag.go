@@ -57,11 +57,13 @@ func (p *Pool) SetKnowledge(k Knowledge) {
 
 // retrieve — фрагменты под вопрос. Недоступная база не ломает ход: агент
 // говорит об этом в ленте и отвечает без неё, как и при недоступном MCP.
+// nil — поиска не было (режим выключен или база недоступна); пустой
+// Kept — поиск был, но ничего не прошло порог (день 24).
 //
 // С rag_rewrite искать идут не по вопросу, а по его переписанной форме
 // (день 23): служебный вызов модели раскрывает отсылки к прошлым репликам
 // и называет термины, которыми это могло быть записано в документах.
-func (a *Agent) retrieve(ctx context.Context, cfg Config, hist []llm.Message, text string, turn *Turn, on func(Event)) []rag.Hit {
+func (a *Agent) retrieve(ctx context.Context, cfg Config, hist []llm.Message, text string, turn *Turn, on func(Event)) *rag.Result {
 	if cfg.RAG == "" {
 		return nil
 	}
@@ -82,7 +84,7 @@ func (a *Agent) retrieve(ctx context.Context, cfg Config, hist []llm.Message, te
 		return nil
 	}
 	on(Event{Kind: EventRetrieval, Label: retrievalLabel(cfg, res), Content: HitTrace(res.Kept)})
-	return res.Kept
+	return res
 }
 
 // retrievalLabel — что сделали этапы поиска: «база знаний: 10 кандидатов →
@@ -193,6 +195,9 @@ func RAGSummary(c Config) string {
 	}
 	if c.RAGRewrite {
 		s += ", rewrite"
+	}
+	if c.RAGCite {
+		s += ", цитаты"
 	}
 	return s
 }

@@ -328,6 +328,7 @@ func memoryHeader(a *agent.Agent) string {
 //	/rag rerank       второй этап: 10 кандидатов, реранкер, порог 0.1
 //	/rag plain        обратно в один этап
 //	/rag rewrite      искать по переписанному запросу — включить и выключить
+//	/rag cite         источники и цитаты с проверкой — включить и выключить (день 24)
 func (m *Model) ragCommand(arg string) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "on", "вкл":
@@ -349,8 +350,11 @@ func (m *Model) ragCommand(arg string) {
 		m.set.RAGCandidates, m.set.RAGMinRerank = nil, nil
 	case "rewrite":
 		m.set.RAG, m.set.RAGRewrite = "on", !m.set.RAGRewrite
+	case "cite":
+		// День 24: источники и цитаты с проверкой, «не знаю» при пустом поиске.
+		m.set.RAG, m.set.RAGCite = "on", !m.set.RAGCite
 	default:
-		m.flash = "формат: /rag on | off | rerank | plain | rewrite"
+		m.flash = "формат: /rag on | off | rerank | plain | rewrite | cite"
 		return
 	}
 	cfg := m.set.AgentConfig()

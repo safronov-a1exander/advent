@@ -106,3 +106,31 @@ func TestCheckReadsDecimalComma(t *testing.T) {
 		t.Fatalf("десятичная запятая: %v", miss)
 	}
 }
+
+func TestCitationChecks(t *testing.T) {
+	ctx := context.Background()
+	// вариант без цитат: «не знаю» ищется в тексте
+	st := &Step{Answer: "Не знаю, в базе этого нет."}
+	if miss, _ := checkCitation(ctx, nil, Line{IDK: true}, st); len(miss) != 0 {
+		t.Fatalf("«не знаю» прозой засчитывается: %v", miss)
+	}
+	st = &Step{Answer: "Курс был около 1000 $."}
+	if miss, _ := checkCitation(ctx, nil, Line{Cited: true}, st); len(miss) == 0 {
+		t.Fatal("ответ без цитат не проходит cited")
+	}
+	// grounded: отказ кода честен
+	st = &Step{Citation: &agent.Citation{Refused: true}}
+	if miss, _ := checkCitation(ctx, nil, Line{Grounded: true}, st); len(miss) != 0 {
+		t.Fatalf("«не знаю» кода — честный исход grounded: %v", miss)
+	}
+	// grounded: ответ прозой без опоры — нет
+	st = &Step{Answer: "В день 13 стадии стоили 1 500 токенов."}
+	if miss, _ := checkCitation(ctx, nil, Line{Grounded: true}, st); len(miss) == 0 {
+		t.Fatal("выдумка без цитат не проходит grounded")
+	}
+	// cited: модель сказала «не знаю», хотя ответ есть
+	st = &Step{Citation: &agent.Citation{Known: false}}
+	if miss, _ := checkCitation(ctx, nil, Line{Cited: true}, st); len(miss) == 0 || !strings.Contains(miss[0], "не знаю") {
+		t.Fatalf("«не знаю» там, где ответ есть, — промах cited: %v", miss)
+	}
+}

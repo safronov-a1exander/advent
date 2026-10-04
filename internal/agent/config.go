@@ -100,6 +100,9 @@ type Config struct {
 	RAGRerank     bool     `yaml:"rag_rerank" json:"rag_rerank,omitempty"`
 	RAGMinRerank  *float64 `yaml:"rag_min_rerank" json:"rag_min_rerank,omitempty"`
 	RAGRewrite    bool     `yaml:"rag_rewrite" json:"rag_rewrite,omitempty"`
+	// RAGCite — отвечать JSON с источниками и дословными цитатами, которые
+	// проверяет код, а при пустом поиске — «не знаю» без модели (день 24).
+	RAGCite bool `yaml:"rag_cite" json:"rag_cite,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -366,6 +369,9 @@ func overlay(base, top Config) Config {
 	}
 	if top.RAGRewrite {
 		out.RAGRewrite = true
+	}
+	if top.RAGCite {
+		out.RAGCite = true
 	}
 	return out
 }

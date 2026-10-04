@@ -68,6 +68,9 @@ func Select(ctx context.Context, rr Reranker, query string, cands []Hit, o Optio
 		}
 		for i := range kept {
 			kept[i].Rerank = scores[i]
+			// и в кандидатах: по ним видно, насколько близко к порогу было
+			// лучшее, когда в запрос не прошло ничего (день 24)
+			res.Candidates[kept[i].Rank-1].Rerank = scores[i]
 		}
 		sort.SliceStable(kept, func(i, j int) bool { return kept[i].Rerank > kept[j].Rerank })
 		n := 0
