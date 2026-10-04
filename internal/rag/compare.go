@@ -117,6 +117,9 @@ type Probe struct {
 	Source string   `yaml:"source"`
 	Expect []string `yaml:"expect"`
 	Note   string   `yaml:"note"`
+	// None — ответа в базе нет (день 23): хороший поиск не должен
+	// отдавать в запрос ничего.
+	None bool `yaml:"none"`
 }
 
 // ProbeSet — набор эталонных вопросов из YAML.
@@ -125,6 +128,8 @@ type ProbeSet struct {
 	Description string  `yaml:"description"`
 	K           int     `yaml:"k"`
 	Probes      []Probe `yaml:"probes"`
+	// Modes — режимы поиска для сравнения (день 23).
+	Modes []Mode `yaml:"modes"`
 }
 
 // LoadProbes читает набор. Строго: неизвестное поле — ошибка.
@@ -138,6 +143,11 @@ func LoadProbes(path string) (*ProbeSet, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&ps); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for i, p := range ps.Probes {
+		if p.None == (len(p.Expect) > 0) {
+			return nil, fmt.Errorf("%s: вопрос %d — нужен либо expect, либо none: true", path, i+1)
+		}
 	}
 	if len(ps.Probes) == 0 {
 		return nil, fmt.Errorf("%s: нет probes", path)
@@ -180,6 +190,9 @@ type ProbeResult struct {
 func Eval(ctx context.Context, ix *Index, emb Embedder, ps *ProbeSet) ([]ProbeResult, error) {
 	var out []ProbeResult
 	for _, p := range ps.Probes {
+		if p.None {
+			continue // вопросы без ответа в базе — для режимов дня 23
+		}
 		hits, err := ix.Query(ctx, emb, p.Q, ps.K)
 		if err != nil {
 			return nil, err
@@ -230,6 +243,93 @@ func ScoreOf(rs []ProbeResult) Score {
 	}
 	if s.N > 0 {
 		s.MRR /= float64(s.N)
+	}
+	return s
+}
+
+// Mode — режим поиска для сравнения (день 23): опции отбора и надо ли
+// переписывать вопрос перед поиском.
+type Mode struct {
+	Name       string  `yaml:"name"`
+	TopK       int     `yaml:"k"`
+	Candidates int     `yaml:"candidates"`
+	MinScore   float32 `yaml:"min_score"`
+	Rerank     bool    `yaml:"rerank"`
+	MinRerank  float32 `yaml:"min_rerank"`
+	Rewrite    bool    `yaml:"rewrite"`
+}
+
+// Options — опции отбора режима.
+func (m Mode) Options() Options {
+	return Options{TopK: m.TopK, Candidates: m.Candidates, MinScore: m.MinScore, Rerank: m.Rerank, MinRerank: m.MinRerank}
+}
+
+// ModeResult — как режим отобрал фрагменты по одному вопросу.
+type ModeResult struct {
+	Probe Probe
+	Query string
+	Kept  []Hit
+	// Rank — место фрагмента с фактом среди отобранных, с единицы; 0 — нет.
+	Rank int
+}
+
+// Correct — режим поступил правильно: факт в запросе, а на вопрос, ответа
+// на который в базе нет, — пустой запрос.
+func (r ModeResult) Correct() bool {
+	if r.Probe.None {
+		return len(r.Kept) == 0
+	}
+	return r.Rank > 0
+}
+
+// ModeScore — сводка режима.
+type ModeScore struct {
+	Answerable, InPrompt, At1 int
+	MRR                       float64
+	// Noise — сколько отобранных фрагментов без факта в среднем на вопрос
+	// с ответом: их модель читает зря и за них платят.
+	Noise float64
+	// OffBase и Refused — вопросов без ответа в базе и сколько из них
+	// ушли без фрагментов.
+	OffBase, Refused int
+	// Kept — фрагментов в запросе в среднем.
+	Kept float64
+}
+
+// ScoreModes — сводка по результатам режима.
+func ScoreModes(rs []ModeResult) ModeScore {
+	var s ModeScore
+	kept, noise := 0, 0
+	for _, r := range rs {
+		kept += len(r.Kept)
+		if r.Probe.None {
+			s.OffBase++
+			if len(r.Kept) == 0 {
+				s.Refused++
+			}
+			continue
+		}
+		s.Answerable++
+		for _, h := range r.Kept {
+			if !r.Probe.Contains(h.Chunk) {
+				noise++
+			}
+		}
+		if r.Rank == 0 {
+			continue
+		}
+		s.InPrompt++
+		if r.Rank == 1 {
+			s.At1++
+		}
+		s.MRR += 1 / float64(r.Rank)
+	}
+	if s.Answerable > 0 {
+		s.MRR /= float64(s.Answerable)
+		s.Noise = float64(noise) / float64(s.Answerable)
+	}
+	if len(rs) > 0 {
+		s.Kept = float64(kept) / float64(len(rs))
 	}
 	return s
 }

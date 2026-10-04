@@ -5,14 +5,17 @@ import (
 	"sync"
 )
 
-// Retriever — индекс и модель эмбеддингов, которой посчитаны его векторы:
-// всё, что нужно агенту, чтобы найти фрагменты под вопрос (день 22).
+// Retriever — индекс, модель эмбеддингов, которой посчитаны его векторы,
+// и реранкер: всё, что нужно агенту, чтобы найти фрагменты под вопрос
+// (дни 22–23).
 //
 // Индекс читается с диска при первом вопросе, а не при старте: чат без
 // RAG не должен падать оттого, что индекс ещё не собран.
 type Retriever struct {
 	Path string
 	Emb  Embedder
+	// Rerank — реранкер второго этапа (день 23); nil — его нет.
+	Rerank Reranker
 
 	once sync.Once
 	ix   *Index
@@ -20,17 +23,17 @@ type Retriever struct {
 }
 
 // NewRetriever — поиск по индексу из файла.
-func NewRetriever(path string, emb Embedder) *Retriever {
-	return &Retriever{Path: path, Emb: emb}
+func NewRetriever(path string, emb Embedder, rr Reranker) *Retriever {
+	return &Retriever{Path: path, Emb: emb, Rerank: rr}
 }
 
-// Retrieve — k ближайших к вопросу фрагментов.
-func (r *Retriever) Retrieve(ctx context.Context, query string, k int) ([]Hit, error) {
+// Retrieve — фрагменты под вопрос: кандидаты и отбор по o.
+func (r *Retriever) Retrieve(ctx context.Context, query string, o Options) (*Result, error) {
 	ix, err := r.Index()
 	if err != nil {
 		return nil, err
 	}
-	return ix.Query(ctx, r.Emb, query, k)
+	return Search(ctx, ix, r.Emb, r.Rerank, query, o)
 }
 
 // Index — индекс, прочитанный при первом обращении.

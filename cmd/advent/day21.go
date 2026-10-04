@@ -188,15 +188,15 @@ func compareProbes(ctx context.Context, ps *rag.ProbeSet, strategies []rag.Strat
 		results[st] = rs
 	}
 
-	fmt.Printf("\n== эталонные вопросы: %d, место чанка с фактом в top-%d ==\n", len(ps.Probes), ps.K)
+	fmt.Printf("\n== эталонные вопросы: %d, место чанка с фактом в top-%d ==\n", len(results[strategies[0]]), ps.K)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	head := "#\tвопрос"
 	for _, st := range strategies {
 		head += "\t" + string(st)
 	}
 	fmt.Fprintln(w, head+"\t")
-	for i, p := range ps.Probes {
-		line := fmt.Sprintf("%d\t%s", i+1, clip(p.Q, 58))
+	for i, r := range results[strategies[0]] {
+		line := fmt.Sprintf("%d\t%s", i+1, clip(r.Probe.Q, 58))
 		for _, st := range strategies {
 			line += "\t" + rankCell(results[st][i])
 		}
@@ -242,6 +242,7 @@ func cmdSearch(ctx context.Context, args []string) error {
 	embName := fs.String("embedder", "", "модель эмбеддингов из config.yaml")
 	k := fs.Int("k", 5, "сколько чанков показать")
 	full := fs.Bool("full", false, "печатать чанк целиком")
+	rerank := fs.Bool("rerank", false, "переоценить найденное реранкером и упорядочить по его оценке (день 23)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом")
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return err
@@ -277,9 +278,24 @@ func cmdSearch(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if *rerank {
+		rr, err := cfg.Reranker("")
+		if err != nil {
+			return err
+		}
+		res, err := rag.Select(ctx, rr, q, hits, rag.Options{Rerank: true})
+		if err != nil {
+			return err
+		}
+		hits = res.Kept
+	}
 	fmt.Printf("вопрос: %s\nиндекс: %s, %d чанков, %s\n", q, st, len(ix.Chunks), ix.Embedder)
 	for i, h := range hits {
-		fmt.Printf("\n%d. %.3f  %s\n   %s\n", i+1, h.Score, h.ID, h.Header())
+		score := fmt.Sprintf("%.3f", h.Score)
+		if *rerank {
+			score += fmt.Sprintf(" · реранк %.2f (был %d-м)", h.Rerank, h.Rank)
+		}
+		fmt.Printf("\n%d. %s  %s\n   %s\n", i+1, score, h.ID, h.Header())
 		text := h.Text
 		if !*full {
 			text = clip(text, 300)
@@ -311,7 +327,7 @@ func reorderFlags(args []string) []string {
 
 func isBoolFlag(a string) bool {
 	switch strings.TrimLeft(a, "-") {
-	case "full":
+	case "full", "rerank":
 		return true
 	}
 	return false

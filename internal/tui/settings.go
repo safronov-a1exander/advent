@@ -61,6 +61,11 @@ type Settings struct {
 	// День 22 — база знаний: искать ли ответ в ней и сколько фрагментов брать.
 	RAG     string
 	RAGTopK *int
+	// День 23 — второй этап поиска.
+	RAGCandidates *int
+	RAGRerank     bool
+	RAGMinRerank  *float64
+	RAGRewrite    bool
 
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
@@ -359,7 +364,27 @@ func (s *Settings) Fields() []Field {
 				"сколько ближайших фрагментов уходит в запрос; пусто — 3",
 				func() *int { return s.RAGTopK },
 				func(v *int) { s.RAGTopK = v },
-				1, 1, 20, 3))
+				1, 1, 20, 3),
+			// День 23 — второй этап: сколько кандидатов, реранк и его порог,
+			// переписывание запроса.
+			IntField("кандидатов",
+				"сколько ближайших по косинусу берёт первый этап поиска; пусто — столько же, сколько фрагментов",
+				func() *int { return s.RAGCandidates },
+				func(v *int) { s.RAGCandidates = v },
+				1, 1, 50, 10),
+			BoolField("реранк",
+				"кросс-энкодер переоценивает кандидатов вместе с вопросом и упорядочивает по своей оценке",
+				func() bool { return s.RAGRerank },
+				func(v bool) { s.RAGRerank = v }),
+			FloatField("порог реранка",
+				"кандидат с оценкой реранкера ниже порога (0…1) в запрос не идёт; пусто — без порога",
+				func() *float64 { return s.RAGMinRerank },
+				func(v *float64) { s.RAGMinRerank = v },
+				0.05, 0, 1, 0.1),
+			BoolField("rewrite",
+				"искать не по вопросу, а по его форме, переписанной служебным вызовом модели",
+				func() bool { return s.RAGRewrite },
+				func(v bool) { s.RAGRewrite = v }))
 	}
 
 	if s.Overlay {
@@ -458,6 +483,10 @@ func (s *Settings) AgentConfig() agent.Config {
 		MCP:            s.MCP,
 		RAG:            s.RAG,
 		RAGTopK:        s.RAGTopK,
+		RAGCandidates:  s.RAGCandidates,
+		RAGRerank:      s.RAGRerank,
+		RAGMinRerank:   s.RAGMinRerank,
+		RAGRewrite:     s.RAGRewrite,
 	}.Clone()
 }
 
@@ -491,6 +520,10 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.MCP = c.MCP
 	s.RAG = c.RAG
 	s.RAGTopK = c.RAGTopK
+	s.RAGCandidates = c.RAGCandidates
+	s.RAGRerank = c.RAGRerank
+	s.RAGMinRerank = c.RAGMinRerank
+	s.RAGRewrite = c.RAGRewrite
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

@@ -49,6 +49,7 @@ func usage() {
   watch     агент сам присылает сводку по расписанию          (день 18)
   index     база знаний: нарезка, эмбеддинги, индекс         (день 21)
   search    ближайшие к вопросу чанки из индекса             (день 21)
+  retrieval режимы поиска рядом: порог, реранкер, rewrite       (день 23)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -105,6 +106,8 @@ func run() error {
 		return cmdIndex(ctx, args)
 	case "search":
 		return cmdSearch(ctx, args)
+	case "retrieval":
+		return cmdRetrieval(ctx, args)
 	case "models":
 		return cmdModels(ctx, args)
 	case "doctor":

@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Поднимает локальную модель эмбеддингов (llama.cpp) для базы знаний.
+  Поднимает локальные модели базы знаний (llama.cpp): эмбеддинги и реранкер.
 
 .DESCRIPTION
   llama-server с флагом --embedding отдаёт OpenAI-совместимый
@@ -12,9 +12,12 @@
   LLAMA_CPP_DIR; по умолчанию $HOME\tools\llama. Ожидается:
     <Dir>\bin\llama-server.exe        сборка с CUDA (или cpu/vulkan)
     <Dir>\models\bge-m3-Q8_0.gguf      https://huggingface.co/gpustack/bge-m3-GGUF
+    <Dir>\models\bge-reranker-v2-m3-Q8_0.gguf   https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF
 
-  Сервер уходит в фон и пишет лог в <Dir>\embed.log. Повторный запуск
-  ничего не делает, если порт уже отвечает.
+  Реранкер (день 23) — второй llama-server с --reranking: /v1/rerank.
+
+  Серверы уходят в фон и пишут логи в <Dir>\embed.log и <Dir>\rerank.log.
+  Повторный запуск ничего не делает, если порт уже отвечает.
 
 .EXAMPLE
   .\scripts\rag-servers.ps1
@@ -25,6 +28,9 @@ param(
   [string]$Dir = $(if ($env:LLAMA_CPP_DIR) { $env:LLAMA_CPP_DIR } else { Join-Path $HOME 'tools\llama' }),
   [int]$EmbedPort = 8081,
   [string]$EmbedModel = 'bge-m3-Q8_0.gguf',
+  # Реранкер (день 23) — второй сервер, на своём порту.
+  [int]$RerankPort = 8082,
+  [string]$RerankModel = 'bge-reranker-v2-m3-Q8_0.gguf',
   # -ngl 99 — все слои на GPU; без видеокарты поставить 0, будет медленнее,
   # но для базы в сотни чанков терпимо.
   [int]$GpuLayers = 99,
@@ -64,4 +70,5 @@ function Start-Llama([string]$Name, [int]$Port, [string]$Model, [string[]]$Extra
 }
 
 Start-Llama 'embed' $EmbedPort $EmbedModel @('--embedding')
+Start-Llama 'rerank' $RerankPort $RerankModel @('--reranking')
 

@@ -86,6 +86,11 @@ func Build(ctx context.Context, docs []Document, st Strategy, c Chunking, emb Em
 type Hit struct {
 	Chunk
 	Score float32 `json:"score"`
+	// Rank — место на первом этапе поиска, с единицы (день 23): по нему
+	// видно, откуда реранкер поднял фрагмент.
+	Rank int `json:"rank,omitempty"`
+	// Rerank — оценка реранкера, 0…1; 0 — реранкер не смотрел (день 23).
+	Rerank float32 `json:"rerank,omitempty"`
 }
 
 // Search — k ближайших по косинусу чанков.

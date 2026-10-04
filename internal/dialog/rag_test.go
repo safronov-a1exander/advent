@@ -14,17 +14,20 @@ import (
 // fakeKB — база из одного фрагмента про лиру; на остальное — пусто.
 type fakeKB struct{ err error }
 
-func (f fakeKB) Retrieve(_ context.Context, q string, k int) ([]rag.Hit, error) {
+func (f fakeKB) Retrieve(_ context.Context, q string, _ rag.Options) (*rag.Result, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	res := &rag.Result{Query: q}
 	if !strings.Contains(strings.ToLower(q), "лир") {
-		return nil, nil
+		return res, nil
 	}
-	return []rag.Hit{{Score: 0.71, Chunk: rag.Chunk{
+	res.Kept = []rag.Hit{{Score: 0.71, Chunk: rag.Chunk{
 		ID: "docs/days/day17.md#3", Source: "docs/days/day17.md", Title: "День 17", Section: "Номинал",
 		Text: "ЦБ публикует курс лиры за 10 единиц.",
-	}}}, nil
+	}}}
+	res.Candidates = res.Kept
+	return res, nil
 }
 
 func TestRAGVariantAnswersFromFragments(t *testing.T) {
