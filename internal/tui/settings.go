@@ -58,6 +58,10 @@ type Settings struct {
 	// нет: список задаётся флагом -mcp, как и сами серверы — в config.yaml.
 	MCP []string
 
+	// День 22 — база знаний: искать ли ответ в ней и сколько фрагментов брать.
+	RAG     string
+	RAGTopK *int
+
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
 	Profiles []string
@@ -342,6 +346,20 @@ func (s *Settings) Fields() []Field {
 				func() string { return s.Task },
 				func(v string) { s.Task = v }),
 		)
+
+		// День 22 — база знаний. Последней: это не о том, как говорить,
+		// а о том, откуда брать факты.
+		kb := EnumField("база знаний", "", agent.RAGModes,
+			func() string { return s.RAG },
+			func(v string) { s.RAG = v })
+		kb.Value = func() string { return agent.RAGLabel(s.RAG) }
+		kb.HintFn = func() string { return agent.RAGHint(s.RAG) }
+		f = append(f, kb,
+			IntField("фрагментов",
+				"сколько ближайших фрагментов уходит в запрос; пусто — 3",
+				func() *int { return s.RAGTopK },
+				func(v *int) { s.RAGTopK = v },
+				1, 1, 20, 3))
 	}
 
 	if s.Overlay {
@@ -438,6 +456,8 @@ func (s *Settings) AgentConfig() agent.Config {
 		User:           s.User,
 		Task:           s.Task,
 		MCP:            s.MCP,
+		RAG:            s.RAG,
+		RAGTopK:        s.RAGTopK,
 	}.Clone()
 }
 
@@ -469,6 +489,8 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.User = c.User
 	s.Task = c.Task
 	s.MCP = c.MCP
+	s.RAG = c.RAG
+	s.RAGTopK = c.RAGTopK
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

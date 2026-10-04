@@ -125,6 +125,8 @@ func main() {
 		var source []string
 		var sep string
 		switch {
+		case ragRequest(req.Messages):
+			source, sep = strings.Fields(mockRAG(req.Messages)), " "
 		case factsRequest(req.Messages):
 			source, sep = []string{mockFacts(req.Messages)}, ""
 		case routeRequest(req.Messages):

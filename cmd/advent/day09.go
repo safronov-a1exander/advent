@@ -32,6 +32,7 @@ func cmdDialog(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("dialog", flag.ExitOnError)
 	c := bindCommon(fs)
 	path := fs.String("scenario", "scenarios/day09-compression.yaml", "сценарий диалога")
+	embName := fs.String("embedder", "", "модель эмбеддингов для вариантов с rag (пусто — rag.embedder; на провайдере mock — mock)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом — для записи видео")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -71,6 +72,13 @@ func cmdDialog(ctx context.Context, args []string) error {
 	hub := mcp.NewHub(cfg.MCPServers)
 	defer hub.Close()
 	pool.SetToolbox(hub)
+	// День 22: база знаний. Пользуются ей только варианты с rag: on,
+	// а индекс читается при первом их вопросе.
+	kb, err := knowledgeFor(cfg, *embName, prov.Name)
+	if err != nil {
+		return err
+	}
+	pool.SetKnowledge(kb)
 
 	started := time.Now()
 	var mu sync.Mutex

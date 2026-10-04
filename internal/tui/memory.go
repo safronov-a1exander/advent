@@ -122,6 +122,12 @@ func (m *Model) memoryCommand(text string) bool {
 		m.profileCommand(rest)
 		return true
 	}
+	// День 22: база знаний включается из поля ввода — так в одном
+	// разговоре видно, как отвечает модель без неё и с ней.
+	if head == "rag" {
+		m.ragCommand(rest)
+		return true
+	}
 	// День 13: стадии задачи двигаются теми же командами из поля ввода.
 	if head == "stage" {
 		m.stageCommand(rest)
@@ -313,4 +319,32 @@ func memoryHeader(a *agent.Agent) string {
 		return ""
 	}
 	return "🧠 " + mem.Summary()
+}
+
+// ragCommand включает и выключает поиск по базе знаний (день 22):
+// /rag on, /rag off, /rag без аргумента — переключить.
+func (m *Model) ragCommand(arg string) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "on", "вкл":
+		m.set.RAG = "on"
+	case "off", "выкл":
+		m.set.RAG = ""
+	case "":
+		if m.set.RAG == "" {
+			m.set.RAG = "on"
+		} else {
+			m.set.RAG = ""
+		}
+	default:
+		m.flash = "формат: /rag on | off"
+		return
+	}
+	m.ag.SetConfig(m.set.AgentConfig())
+	m.pushLine("")
+	if m.set.RAG == "" {
+		m.pushLine(stNote.Render("📚 база знаний выключена — модель отвечает тем, что знает сама"))
+	} else {
+		m.pushLine(stNote.Render("📚 база знаний включена — перед ответом агент ищет фрагменты"))
+	}
+	m.refresh()
 }

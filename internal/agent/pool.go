@@ -59,6 +59,10 @@ type Pool struct {
 	// tools — MCP-серверы, общие на пул (день 17): соединение с сервером
 	// одно, а какие серверы выданы агенту, решает его конфиг.
 	tools Toolbox
+
+	// knowledge — база знаний, общая на пул (день 22): индекс один,
+	// а пользоваться ли им, решает конфиг агента.
+	knowledge Knowledge
 }
 
 // SetInvariantStore включает инварианты.
@@ -328,13 +332,14 @@ func (p *Pool) spawn(cfg Config, temp bool) *Agent {
 		name = "agent"
 	}
 	a := &Agent{
-		id:       fmt.Sprintf("%s-%03d", slug(name), p.seq),
-		provider: p.provider,
-		client:   p.client,
-		journal:  p.journal,
-		cfg:      cfg.Clone(),
-		temp:     temp,
-		tools:    p.tools,
+		id:        fmt.Sprintf("%s-%03d", slug(name), p.seq),
+		provider:  p.provider,
+		client:    p.client,
+		journal:   p.journal,
+		cfg:       cfg.Clone(),
+		temp:      temp,
+		tools:     p.tools,
+		knowledge: p.knowledge,
 	}
 	p.wireProfile(a, cfg)
 	p.wireTask(a, cfg)
@@ -393,19 +398,20 @@ func (p *Pool) Restore() ([]*Agent, error) {
 			continue
 		}
 		a := &Agent{
-			id:       snap.ID,
-			provider: p.provider,
-			client:   p.client,
-			journal:  p.journal,
-			cfg:      snap.Config.Clone(),
-			tools:    p.tools,
-			history:  append([]llm.Message(nil), snap.History...),
-			stats:    snap.Stats,
-			turns:    append([]Turn(nil), snap.Turns...),
-			calib:    snap.Calibration,
-			created:  snap.Created,
-			updated:  snap.Updated,
-			rev:      snap.Rev,
+			id:        snap.ID,
+			provider:  p.provider,
+			client:    p.client,
+			journal:   p.journal,
+			cfg:       snap.Config.Clone(),
+			tools:     p.tools,
+			knowledge: p.knowledge,
+			history:   append([]llm.Message(nil), snap.History...),
+			stats:     snap.Stats,
+			turns:     append([]Turn(nil), snap.Turns...),
+			calib:     snap.Calibration,
+			created:   snap.Created,
+			updated:   snap.Updated,
+			rev:       snap.Rev,
 		}
 		p.wireProfile(a, snap.Config)
 		p.wireTask(a, snap.Config)
