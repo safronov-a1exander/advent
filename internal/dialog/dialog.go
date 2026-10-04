@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
+	"github.com/safronov-a1exander/advent/internal/rag"
 	"github.com/safronov-a1exander/advent/internal/task"
 )
 
@@ -118,6 +120,11 @@ type Line struct {
 	// а то, что она передала между инструментами: сервер сам сверяет вход
 	// со своей выдачей и пишет итог сверки в результат.
 	ToolExpect map[string]string `yaml:"tool_expect"`
+	// Sources — из каких файлов базы знаний должны прийти фрагменты
+	// (день 22): «docs/days/day17.md». Проверяется поиск, а не ответ,
+	// и только у вариантов с rag: варианту без базы искать негде,
+	// его сравнивают по ответу.
+	Sources []string `yaml:"sources"`
 	// Note — зачем эта реплика: попадает в отчёт рядом с проверкой.
 	Note string `yaml:"note"`
 }
@@ -150,7 +157,7 @@ func (l Line) checkFor(variant string) Check {
 
 // Checked — есть ли у строки проверки хоть для кого-нибудь.
 func (l Line) Checked() bool {
-	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0
+	return len(l.Expect) > 0 || len(l.Forbid) > 0 || len(l.ExpectBy) > 0 || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || len(l.Sources) > 0
 }
 
 // Load читает сценарий.
@@ -231,7 +238,9 @@ type Step struct {
 	Violations int
 	// Tools — вызовы инструментов на этом ходе по порядку (день 17).
 	Tools []mcp.Outcome
-	Turn  agent.Turn
+	// Sources — фрагменты базы знаний, с которыми ушёл вопрос (день 22).
+	Sources []rag.Hit
+	Turn    agent.Turn
 	// Checked — у реплики были проверки; Passed — все подстроки нашлись.
 	Checked bool
 	Passed  bool
@@ -357,7 +366,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		turnsBefore := len(a.Turns())
 		reply, err := a.Ask(ctx, l.Say, nil)
 		want := l.checkFor(cfg.Name)
-		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0, Branch: a.ActiveBranch(), State: stateOf(a)}
+		st := Step{Say: l.Say, Checked: !want.Empty() || len(l.Tools) > 0 || l.NoTools || l.UsesResult || len(l.ToolExpect) > 0 || len(l.Chains) > 0 || len(l.Passes) > 0 || (len(l.Sources) > 0 && cfg.RAG != ""), Branch: a.ActiveBranch(), State: stateOf(a)}
 		if err != nil {
 			st.Err = err.Error()
 			res.Steps = append(res.Steps, st)
@@ -365,6 +374,7 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 		}
 		st.Answer = reply.Final.Content
 		st.Tools = reply.Tools
+		st.Sources = reply.Sources
 		_, st.Cost = reply.Usage()
 		if turns := a.Turns(); len(turns) > turnsBefore {
 			st.Turn = turns[len(turns)-1]
@@ -392,6 +402,12 @@ func runVariant(ctx context.Context, pool *agent.Pool, cfg agent.Config, branche
 				if miss := checkToolResult(st.Tools, tool, want); miss != "" {
 					st.Passed = false
 					st.Missing = append(st.Missing, miss)
+				}
+			}
+			if cfg.RAG != "" {
+				if miss := checkSources(st.Sources, l.Sources); len(miss) > 0 {
+					st.Passed = false
+					st.Missing = append(st.Missing, miss...)
 				}
 			}
 			if l.UsesResult && !usesResult(l.Say, st.Answer, st.Tools) {
@@ -465,6 +481,9 @@ func (st Step) Brief(sent bool) string {
 	if len(st.Tools) > 0 {
 		c += " ▸ " + agent.ToolTrace(st.Tools)
 	}
+	if len(st.Sources) > 0 {
+		c += fmt.Sprintf(" ⌕%d", len(st.Sources))
+	}
 	if st.Checked {
 		if st.Passed {
 			c += " ✓"
@@ -488,6 +507,9 @@ func (l Line) Text() string {
 	return strings.Join(strings.Fields(l.Say), " ")
 }
 
+// decimalComma — запятая между цифрами.
+var decimalComma = regexp.MustCompile(`(\d),(\d)`)
+
 // check — все ли ожидаемые подстроки есть в ответе и нет ли запрещённых.
 // Регистр и неразрывные пробелы в числах не важны: «21 135» и «21135» —
 // один и тот же ответ.
@@ -497,7 +519,9 @@ func check(answer string, want Check) (bool, []string) {
 		for _, sp := range []string{" ", " ", " "} {
 			s = strings.ReplaceAll(s, sp, "")
 		}
-		return s
+		// «0,0046» и «0.0046» — одно число: по-русски модель пишет
+		// десятичную запятую, а заметки стенда — точку (день 22).
+		return decimalComma.ReplaceAllString(s, "$1.$2")
 	}
 	a := norm(answer)
 	var missing []string
@@ -600,4 +624,22 @@ func runMemoryCommand(a *agent.Agent, l Line, cmd string) Step {
 	// сразу видно, что перейти не удалось.
 	st.State = stateOf(a)
 	return st
+}
+
+// checkSources — пришли ли фрагменты из всех нужных файлов (день 22).
+func checkSources(got []rag.Hit, want []string) []string {
+	var missing []string
+	for _, w := range want {
+		found := false
+		for _, h := range got {
+			if h.Source == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, "не найден источник: "+w)
+		}
+	}
+	return missing
 }

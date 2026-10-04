@@ -93,6 +93,9 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 		if l.UsesResult {
 			b.WriteString("Ответ должен опираться на результат инструмента.\n\n")
 		}
+		if len(l.Sources) > 0 {
+			fmt.Fprintf(&b, "Источники в базе знаний: %s\n\n", "`"+strings.Join(l.Sources, "`, `")+"`")
+		}
 		// Ожидания у профилей разные по построению: джуниору код нужен,
 		// продакту запрещён. Поэтому персональные проверки печатаются рядом,
 		// иначе по отчёту непонятно, почему один вариант «прошёл», а другой
@@ -136,6 +139,10 @@ func Markdown(s *Scenario, provider string, res []Result, started time.Time) str
 					res = "✗"
 				}
 				fmt.Fprintf(&b, "  - ⚙ `%s` `%s` %s %s\n", displayTool(o), cell(o.Args, 160), res, cell(o.Text, 200))
+			}
+			// День 22: с какими фрагментами ушёл вопрос.
+			for _, h := range st.Sources {
+				fmt.Fprintf(&b, "  - ⌕ %.3f `%s` %s\n", h.Score, h.ID, cell(h.Section, 100))
 			}
 			fmt.Fprintf(&b, "  > %s\n", cell(st.Answer, 400))
 		}

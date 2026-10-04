@@ -760,6 +760,19 @@ func (m *Model) onEvent(e agent.Event) {
 			line += fmt.Sprintf(" · %s", e.Latency.Round(time.Millisecond))
 		}
 		m.pushLine(st.Render(line))
+	case agent.EventRetrieval:
+		// День 22: что агент нашёл в базе знаний до запроса — по строке на
+		// фрагмент. Ответ, который придёт следом, написан по ним.
+		if e.Failed {
+			m.pushLine(stErr.Render("✗ " + e.Label + " " + shorten(oneLine(e.Content), 200)))
+			break
+		}
+		m.pushLine(stNote.Render("▸ " + e.Label))
+		for _, l := range strings.Split(e.Content, "\n") {
+			if strings.TrimSpace(l) != "" {
+				m.pushLine(stDim.Render("  ↳ " + shorten(l, 200)))
+			}
+		}
 	case agent.EventContext:
 		if e.Usage.PromptTokens == 0 {
 			m.pushLine(stErr.Render("▸ " + e.Label + ": " + shorten(e.Content, 200)))

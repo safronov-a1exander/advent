@@ -84,6 +84,12 @@ type Config struct {
 	// MCP — имена MCP-серверов из config.yaml, чьи инструменты выданы
 	// агенту (день 17). Пусто — агент без инструментов.
 	MCP []string `yaml:"mcp" json:"mcp,omitempty"`
+
+	// RAG — поиск по базе знаний перед ответом (день 22): "" — без него,
+	// "on" — найденные фрагменты уходят в запрос вместе с вопросом.
+	RAG string `yaml:"rag" json:"rag,omitempty"`
+	// RAGTopK — сколько фрагментов уходит в запрос; nil — DefaultRAGTopK.
+	RAGTopK *int `yaml:"rag_k" json:"rag_k,omitempty"`
 }
 
 // Clone — глубокая копия: указатели и срезы не делятся между агентами,
@@ -116,6 +122,9 @@ func (c Config) Clone() Config {
 	}
 	if c.MCP != nil {
 		out.MCP = append([]string(nil), c.MCP...)
+	}
+	if c.RAGTopK != nil {
+		out.RAGTopK = llm.I(*c.RAGTopK)
 	}
 	return out
 }
@@ -224,6 +233,9 @@ func (c Config) Summary() string {
 	if len(c.MCP) > 0 {
 		parts = append(parts, mcpSummary(c.MCP))
 	}
+	if c.RAG != "" {
+		parts = append(parts, fmt.Sprintf("RAG: %d фрагм.", c.ragTopK()))
+	}
 	if !c.Stream {
 		parts = append(parts, "без стриминга")
 	}
@@ -314,6 +326,12 @@ func overlay(base, top Config) Config {
 	}
 	if top.MCP != nil {
 		out.MCP = append([]string(nil), top.MCP...)
+	}
+	if top.RAG != "" {
+		out.RAG = top.RAG
+	}
+	if top.RAGTopK != nil {
+		out.RAGTopK = llm.I(*top.RAGTopK)
 	}
 	return out
 }

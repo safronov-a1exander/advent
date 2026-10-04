@@ -75,6 +75,11 @@ type askFlags struct {
 	// mcp — MCP-серверы из config.yaml через запятую (день 17).
 	mcp string
 
+	// rag — искать ответ в базе знаний (день 22); embedder — чем считать
+	// вектор вопроса (пусто — rag.embedder из config.yaml).
+	rag      bool
+	embedder string
+
 	// cfg — загруженный config.yaml; заполняется в setup.
 	cfg *config.Config
 }
@@ -105,6 +110,8 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.memoryUser, "user", "", "чей долговременный слой памяти")
 	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
 	fs.StringVar(&a.mcp, "mcp", "", "MCP-серверы из config.yaml через запятую, чьи инструменты выданы агенту (день 17)")
+	fs.BoolVar(&a.rag, "rag", false, "искать ответ в базе знаний (день 22): фрагменты уходят в запрос вместе с вопросом")
+	fs.StringVar(&a.embedder, "embedder", "", "модель эмбеддингов из config.yaml для -rag (пусто — rag.embedder; на провайдере mock — mock)")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
 }
@@ -401,6 +408,19 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		defer hub.Close()
 		pool.SetToolbox(hub)
 		set.MCP = servers
+	}
+
+	// День 22: база знаний. Индекс читается при первом вопросе с RAG,
+	// поэтому подключается всегда — поиск можно включить и из панели.
+	kb, err := knowledgeFor(a.cfg, a.embedder, a.provider)
+	switch {
+	case err == nil:
+		pool.SetKnowledge(kb)
+	case a.rag:
+		return fmt.Errorf("-rag: %w", err)
+	}
+	if a.rag {
+		set.RAG = "on"
 	}
 
 	m := tui.NewModel(opts)

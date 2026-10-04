@@ -31,6 +31,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/memory"
 	"github.com/safronov-a1exander/advent/internal/profile"
+	"github.com/safronov-a1exander/advent/internal/rag"
 	"github.com/safronov-a1exander/advent/internal/store"
 	"github.com/safronov-a1exander/advent/internal/task"
 )
@@ -71,6 +72,9 @@ const (
 	// EventToolResult — инструмент ответил: Content — результат, Failed —
 	// ошибка инструмента, которую увидит модель.
 	EventToolResult
+	// EventRetrieval — поиск по базе знаний перед ответом (день 22):
+	// Content — найденные фрагменты по строке, Failed — база недоступна.
+	EventRetrieval
 )
 
 // Event — уведомление для того, кто показывает ответ. Агенту всё равно,
@@ -98,6 +102,8 @@ type Reply struct {
 	Steps []Step
 	// Tools — вызовы MCP-инструментов по порядку (день 17).
 	Tools []mcp.Outcome
+	// Sources — фрагменты базы знаний, с которыми ушёл вопрос (день 22).
+	Sources []rag.Hit
 }
 
 // Usage — суммарный расход всех шагов ответа.
@@ -183,6 +189,8 @@ type Agent struct {
 	// tools — MCP-серверы, к которым агент может обратиться (день 17);
 	// какие именно ему выданы, решает конфиг (Config.MCP).
 	tools Toolbox
+	// knowledge — база знаний (день 22); пользоваться ли ею, решает Config.RAG.
+	knowledge Knowledge
 	// newMem — как собрать слои под конфиг; ставит пул. Нужен, когда посреди
 	// разговора меняют задачу или пользователя: слои должны переехать
 	// на другие файлы, а не продолжать писать в прежние.
@@ -453,8 +461,13 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	funcs := a.functions(ctx, cfg, on)
 	turn.Tools = len(funcs)
 
+	// День 22: фрагменты базы знаний — до оценки размера: они едут
+	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
+	hits := a.retrieve(ctx, cfg, text, on)
+	question := augment(text, hits)
+
 	a.mu.Lock()
-	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, text)) + rawEstimateTools(funcs))
+	turn.Estimated = a.calibrated(rawEstimateMessages(compose(system, past, question)) + rawEstimateTools(funcs))
 	turn.Sent = len(past)
 	a.mu.Unlock()
 
@@ -467,7 +480,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	chain := Chain(cfg.Strategy)
 	prev := map[string]string{}
-	reply := &Reply{}
+	reply := &Reply{Sources: hits}
 
 	for _, st := range chain {
 		// История (в том виде, в каком её собрала стратегия контекста)
@@ -481,7 +494,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 		if st.System != "" {
 			stepSystem = st.System
 		}
-		req := llm.Request{Messages: compose(stepSystem, stepPast, st.Build(text, prev))}
+		req := llm.Request{Messages: compose(stepSystem, stepPast, st.Build(question, prev))}
 		cfg.Apply(&req)
 
 		if st.Final && len(chain) > 1 {
