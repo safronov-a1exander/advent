@@ -111,6 +111,7 @@ go run ./cmd/advent ask -provider local "Сколько будет 15% от 6000
 ```powershell
 $env:LLAMA_CPP_DIR = 'C:\Users\sanya\tools\llama'   # если не $HOME\tools\llama
 .\scripts\local-llm.ps1
+Remove-Item -Recurse -Force runs\sessions-day26 -ErrorAction SilentlyContinue
 $t = 'advent · день 26 — локальная модель'
-.\scripts\demo.ps1 -Name day26 -AppArgs @('demo','-script','scripts/day26.demo','-provider','local','-title',$t)
+.\scripts\demo.ps1 -Name day26 -AppArgs @('demo','-script','scripts/day26.demo','-provider','local','-sessions','runs/sessions-day26','-new','-title',$t)
 ```
