@@ -77,7 +77,9 @@ type askFlags struct {
 
 	// rag — искать ответ в базе знаний (день 22); embedder — чем считать
 	// вектор вопроса (пусто — rag.embedder из config.yaml).
-	rag      bool
+	rag bool
+	// offline — день 27: чат стартует, только если все адреса в своей сети.
+	offline  bool
 	embedder string
 	// ragRerank и ragRewrite — второй этап поиска (день 23).
 	ragRerank  bool
@@ -118,6 +120,7 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.StringVar(&a.memoryUser, "user", "", "чей долговременный слой памяти")
 	fs.StringVar(&a.memoryTask, "task", "", "какой задачи рабочий слой памяти")
 	fs.StringVar(&a.mcp, "mcp", "", "MCP-серверы из config.yaml через запятую, чьи инструменты выданы агенту (день 17)")
+	fs.BoolVar(&a.offline, "offline", false, "только своя сеть (день 27): модель, MCP по адресу, эмбеддинги и реранкер — на этой машине или в локальной сети, иначе чат не стартует")
 	fs.BoolVar(&a.rag, "rag", false, "искать ответ в базе знаний (день 22): фрагменты уходят в запрос вместе с вопросом")
 	fs.BoolVar(&a.ragRerank, "rag-rerank", false, "второй этап поиска (день 23): 10 кандидатов, реранкер, порог 0.1; включает -rag")
 	fs.BoolVar(&a.ragRewrite, "rag-rewrite", false, "искать по переписанному моделью запросу (день 23); включает -rag")
@@ -452,6 +455,15 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	set.RAGRewrite = a.ragRewrite
 	set.RAGCite = a.ragCite
 	set.RAGExpand = a.ragChat
+
+	// День 27: всё приложение без облака — проверка до первого запроса.
+	if a.offline {
+		where, err := offlineCheck(a.cfg, prov, splitList(a.mcp), a.rag, a.embedder)
+		if err != nil {
+			return err
+		}
+		opts.Notice = strings.TrimSpace(where + "\n" + opts.Notice)
+	}
 
 	m := tui.NewModel(opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
