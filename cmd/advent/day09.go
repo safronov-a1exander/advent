@@ -34,6 +34,7 @@ func cmdDialog(ctx context.Context, args []string) error {
 	path := fs.String("scenario", "scenarios/day09-compression.yaml", "сценарий диалога")
 	embName := fs.String("embedder", "", "модель эмбеддингов для вариантов с rag (пусто — rag.embedder; на провайдере mock — mock)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом — для записи видео")
+	model := fs.String("model", "", "модель вместо defaults.model сценария (день 28): один сценарий — на локальной модели и в облаке; пусто с -provider — default_model провайдера")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,6 +49,18 @@ func cmdDialog(ctx context.Context, args []string) error {
 	client, prov, err := cfg.Client(c.provider)
 	if err != nil {
 		return err
+	}
+	// День 28: тот же сценарий на другом провайдере. Модель сценария
+	// принадлежит его провайдеру, поэтому при явном -provider без -model
+	// (и в сценарии без модели) берётся модель по умолчанию выбранного.
+	switch {
+	case *model != "":
+		s.Defaults.Model = *model
+	case s.Defaults.Model == "" && s.Defaults.Tier == "",
+		c.provider != "" && c.provider != cfg.DefaultProvider:
+		if prov.DefaultMod != "" {
+			s.Defaults.Model = prov.DefaultMod
+		}
 	}
 	runID := store.NewRunID("dialog-" + strings.TrimSuffix(filepath.Base(*path), filepath.Ext(*path)))
 	journal, err := store.NewWriter(cfg.RunsDir, runID)
