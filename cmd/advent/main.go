@@ -51,6 +51,8 @@ func usage() {
   search    ближайшие к вопросу чанки из индекса             (день 21)
   retrieval режимы поиска рядом: порог, реранкер, rewrite       (день 23)
   bench     ресурсы локальной модели: видеопамять, загрузка, скорость (день 29)
+  serve     приватный сервис: шлюз с ключами и лимитами перед моделью (день 30)
+  load      проверка сервиса по сети: параллельно, очередь, окно, лимит (день 30)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -109,6 +111,10 @@ func run() error {
 		return cmdSearch(ctx, args)
 	case "retrieval":
 		return cmdRetrieval(ctx, args)
+	case "serve":
+		return cmdServe(ctx, args)
+	case "load":
+		return cmdLoad(ctx, args)
 	case "bench":
 		return cmdBench(ctx, args)
 	case "models":
