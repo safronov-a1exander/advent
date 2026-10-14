@@ -1,0 +1,35 @@
+name: "День 27 — «Бюджет» целиком на локальной модели"
+description: |
+  Тот же разговор с инструментами, что в дне 19: поиск по выписке, сводка,
+  отчёт в файл. Модель — Qwen3-4B в llama.cpp на этой машине, MCP-сервер —
+  подпроцесс стенда. Облака нет ни в одном звене.
+  Запуск: advent dialog -provider local -scenario scenarios/day27-local-app.yaml
+
+defaults:
+  model: qwen3-4b
+  temperature: 0
+  thinking: disabled
+  system: |
+    Ты ассистент по личным финансам. Отвечай по-русски, коротко и по делу.
+    Суммы бери только из инструментов, в уме не пересчитывай.
+
+variants:
+  - name: локально
+    mcp: [budget]
+
+dialog:
+  - say: "Найди все мои траты на кафе в сентябре 2026, посчитай итог с учётом возвратов и сохрани отчёт в файл."
+    tools: [search_transactions, summarize_transactions, save_report]
+    tool_expect:
+      summarize_transactions: "без расхождений"
+      save_report: "в отчёте есть"
+    expect: ["1390"]
+    note: "Цепочка из трёх инструментов. Итог: 390 + 1480 − 480 возврат = 1390."
+
+  - say: "Теперь то же самое по покупкам за сентябрь, и тоже сохрани отчёт."
+    tools: [search_transactions, summarize_transactions, save_report]
+    tool_expect:
+      summarize_transactions: "без расхождений"
+      save_report: "в отчёте есть"
+    expect: ["2350"]
+    note: "Ловушка с датой: покупка 31 августа в сентябрь не входит. Wildberries 4150 − возврат 1800 = 2350."
