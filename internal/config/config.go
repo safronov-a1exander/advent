@@ -22,6 +22,10 @@ type Provider struct {
 	APIKey     string          `yaml:"api_key"` // только для config.local.yaml
 	Models     []llm.ModelInfo `yaml:"models"`
 	DefaultMod string          `yaml:"default_model"`
+	// ThinkingVia — как передавать режим рассуждений: пусто — полем
+	// thinking (DeepSeek), chat_template_kwargs — переменной шаблона чата
+	// (llama.cpp с --jinja, день 26).
+	ThinkingVia string `yaml:"thinking_via"`
 }
 
 type Config struct {
@@ -258,7 +262,11 @@ func (c *Config) Client(name string) (*llm.Client, *Provider, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return llm.New(p.Name, p.BaseURL, key, llm.WithPricing(p.PricingMap())), p, nil
+	opts := []llm.ClientOption{llm.WithPricing(p.PricingMap())}
+	if p.ThinkingVia == "chat_template_kwargs" {
+		opts = append(opts, llm.WithTemplateThinking())
+	}
+	return llm.New(p.Name, p.BaseURL, key, opts...), p, nil
 }
 
 // ModelByTier ищет модель нужного класса (weak/medium/strong).
