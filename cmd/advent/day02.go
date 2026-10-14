@@ -28,6 +28,7 @@ type runFlags struct {
 	runID        string
 	noReport     bool
 	full         bool
+	warmup       bool
 }
 
 func bindRun(fs *flag.FlagSet) *runFlags {
@@ -38,6 +39,7 @@ func bindRun(fs *flag.FlagSet) *runFlags {
 	fs.StringVar(&r.runID, "run", "", "имя журнала в runs/")
 	fs.BoolVar(&r.noReport, "no-report", false, "не сохранять markdown-отчёт")
 	fs.BoolVar(&r.full, "full", false, "печатать полные ответы, а не только таблицу")
+	fs.BoolVar(&r.warmup, "warmup", false, "прогревать модель перед её первым вариантом — загрузка весов не попадает в замер")
 	return r
 }
 
@@ -85,6 +87,7 @@ func (r *runFlags) build() (*scenario.Scenario, *runner.Runner, *store.Writer, *
 		Fallback:      prov.DefaultMod,
 		Models:        prov.PricingMap(),
 		ModelOverride: modelOverride,
+		Warmup:        r.warmup,
 	}
 	return sc, rn, w, cfg, prov, nil
 }
@@ -110,6 +113,8 @@ func cmdRun(ctx context.Context, args []string) error {
 
 	res, err := rn.Run(ctx, sc, func(ev runner.Event) {
 		switch ev.Kind {
+		case "warmup":
+			fmt.Printf("  прогрев %s\n", ev.Label)
 		case "variant-start":
 			fmt.Printf("  → %-40s ", trunc(ev.Label, 40))
 		case "variant-done":

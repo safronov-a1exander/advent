@@ -86,7 +86,7 @@ type Result struct {
 type Progress func(ev Event)
 
 type Event struct {
-	Kind      string // "variant-start" | "step-done" | "variant-done"
+	Kind      string // "warmup" | "variant-start" | "step-done" | "variant-done"
 	VariantID string
 	Label     string
 	N         int
@@ -107,6 +107,11 @@ type Runner struct {
 	ModelOverride string
 	// SystemOverride — заменить системный промпт во всех вариантах.
 	SystemOverride string
+	// Warmup — перед первым вариантом на новой модели послать ей короткий
+	// запрос мимо журнала и замеров (день 29). llama-server в режиме роутера
+	// грузит веса по первому запросу к модели — без прогрева эти секунды
+	// попадали бы в задержку первого прогона.
+	Warmup bool
 }
 
 func (r *Runner) Run(ctx context.Context, s *scenario.Scenario, onProgress Progress) (*Result, error) {
@@ -115,7 +120,17 @@ func (r *Runner) Run(ctx context.Context, s *scenario.Scenario, onProgress Progr
 		res.RunID = r.Store.RunID()
 	}
 
+	warm := ""
 	for _, v := range s.Variants {
+		if model := r.modelFor(s, v); r.Warmup && model != warm {
+			if onProgress != nil {
+				onProgress(Event{Kind: "warmup", VariantID: v.ID, Label: model})
+			}
+			if err := r.warmup(ctx, model); err != nil {
+				return res, fmt.Errorf("прогрев %s: %w", model, err)
+			}
+			warm = model
+		}
 		for n := 1; n <= s.Repeat; n++ {
 			if err := ctx.Err(); err != nil {
 				return res, err
@@ -135,11 +150,28 @@ func (r *Runner) Run(ctx context.Context, s *scenario.Scenario, onProgress Progr
 	return res, nil
 }
 
-func (r *Runner) runVariant(ctx context.Context, s *scenario.Scenario, v scenario.Variant, n int) Attempt {
-	model := s.EffectiveModel(v, r.Fallback)
+func (r *Runner) modelFor(s *scenario.Scenario, v scenario.Variant) string {
 	if r.ModelOverride != "" {
-		model = r.ModelOverride
+		return r.ModelOverride
 	}
+	return s.EffectiveModel(v, r.Fallback)
+}
+
+// warmup — один токен в ответ на короткий запрос: модель загружена,
+// дальше задержка меряет ответ, а не чтение весов с диска.
+func (r *Runner) warmup(ctx context.Context, model string) error {
+	one := 1
+	_, err := r.Client.Chat(ctx, llm.Request{
+		Model:     model,
+		Messages:  []llm.Message{{Role: llm.RoleUser, Content: "ok"}},
+		MaxTokens: &one,
+		Thinking:  &llm.Thinking{Type: "disabled"},
+	})
+	return err
+}
+
+func (r *Runner) runVariant(ctx context.Context, s *scenario.Scenario, v scenario.Variant, n int) Attempt {
+	model := r.modelFor(s, v)
 	a := Attempt{VariantID: v.ID, Label: v.Label, Model: model, N: n}
 
 	vars := map[string]string{}

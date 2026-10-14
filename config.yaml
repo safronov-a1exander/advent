@@ -101,6 +101,33 @@ providers:
         reasoning: true
         url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
         description: те же веса в 8 бит, 4.3 ГБ — для сравнения квантований
+      # Пресеты роутера (день 29, scripts/llama-presets.ini): те же веса
+      # Q4_K_M, но другое окно и KV-кэш в 8 бит. Окно задаётся при загрузке
+      # модели, поэтому каждая конфигурация сервера — своё имя модели.
+      - id: qwen3-4b-c4k
+        label: Q4_K_M · окно 4096 · KV q8_0
+        tier: weak
+        params_b: 4
+        quant: q4_k_m
+        in_per_1m: 0
+        cached_in_per_1m: 0
+        out_per_1m: 0
+        max_context: 4096
+        reasoning: true
+        url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+        description: окно под задачу — промпт с выпиской и ответ занимают ~2000 токенов
+      - id: qwen3-4b-c1536
+        label: Q4_K_M · окно 1536 · KV q8_0
+        tier: weak
+        params_b: 4
+        quant: q4_k_m
+        in_per_1m: 0
+        cached_in_per_1m: 0
+        out_per_1m: 0
+        max_context: 1536
+        reasoning: true
+        url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+        description: окно меньше задачи — ответ обрывается
 
   # Заглушка `go run ./tools/mockllm` — репетиция демо и запись видео
   # без траты токенов. Цены выдуманы, чтобы колонка стоимости была не пустой.

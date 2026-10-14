@@ -54,6 +54,7 @@ type Lab struct {
 	attempts []runner.Attempt
 	byID     map[string][]int
 	cur      string // вариант, который считается прямо сейчас
+	loading  string // модель, которая сейчас грузится (прогрев)
 	res      *runner.Result
 	saved    string
 	err      error
@@ -119,8 +120,10 @@ func (l *Lab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case labEventMsg:
 		ev := runner.Event(msg)
 		switch ev.Kind {
+		case "warmup":
+			l.cur, l.loading = ev.VariantID, ev.Label
 		case "variant-start":
-			l.cur = ev.VariantID
+			l.cur, l.loading = ev.VariantID, ""
 		case "variant-done":
 			if ev.Attempt != nil {
 				l.attempts = append(l.attempts, *ev.Attempt)
@@ -563,6 +566,9 @@ func (l *Lab) View() tea.View {
 	switch {
 	case l.busy.Load():
 		status = l.sp.View() + " прогон… " + l.cur
+		if l.loading != "" {
+			status = l.sp.View() + " загрузка модели " + l.loading + "…"
+		}
 	case l.panel.Editing():
 		status = shortHelp(l.help, l.editKeys.Apply, l.editKeys.Cancel)
 	case l.focus == focusPanel:

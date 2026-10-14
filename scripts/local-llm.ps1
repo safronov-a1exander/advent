@@ -20,9 +20,16 @@
   Сервер уходит в фон, лог — <Dir>\chat.log. Повторный запуск ничего не
   делает, если порт уже отвечает; -Restart перезапускает с новыми параметрами.
 
+  -Router (день 29) — режим роутера: один порт, а модель выбирается полем
+  model запроса. Конфигурации — пресеты scripts/llama-presets.ini: квантовка,
+  окно, тип KV-кэша. В памяти одна модель (--models-max 1): запрос к другой
+  выгружает текущую и грузит нужную. Сервер запускается из <Dir>, пути
+  моделей в пресетах считаются от него.
+
 .EXAMPLE
   .\scripts\local-llm.ps1
   .\scripts\local-llm.ps1 -Model Qwen3-4B-Q8_0.gguf -Alias qwen3-4b-q8 -Restart
+  .\scripts\local-llm.ps1 -Router -Restart
   .\scripts\local-llm.ps1 -Stop
 #>
 [CmdletBinding()]
@@ -40,6 +47,9 @@ param(
   # Адрес, на котором слушать. 127.0.0.1 — только эта машина.
   [string]$Listen = '127.0.0.1',
   [string[]]$Extra = @(),
+  # Режим роутера с пресетами (день 29).
+  [switch]$Router,
+  [string]$Presets = (Join-Path $PSScriptRoot 'llama-presets.ini'),
   [switch]$Restart,
   [switch]$Stop
 )
@@ -65,20 +75,32 @@ if ($Stop) { Stop-Port $Port; Write-Host "чат-модель на :$Port ост
 $server = Join-Path $Dir 'bin\llama-server.exe'
 if (-not (Test-Path $server)) { throw "нет $server — укажи -Dir или LLAMA_CPP_DIR" }
 $path = Join-Path $Dir "models\$Model"
-if (-not (Test-Path $path)) { throw "нет модели $path" }
+if (-not $Router -and -not (Test-Path $path)) { throw "нет модели $path" }
 
 if (Test-Health $Port) {
   if (-not $Restart) { Write-Host "чат-модель уже работает на :$Port"; return }
   Stop-Port $Port
 }
 
-$argv = @('-m', $path, '--alias', $Alias, '--host', $Listen, '--port', "$Port",
-          '-ngl', "$GpuLayers", '-c', "$Context", '-np', "$Parallel", '--jinja', '--metrics') + $Extra
-Start-Process -FilePath $server -ArgumentList $argv -WindowStyle Hidden `
-  -RedirectStandardError (Join-Path $Dir 'chat.log') | Out-Null
+if ($Router) {
+  # Логи дочерних серверов (скорость, окно) идут в stdout роутера.
+  $argv = @('--models-preset', (Resolve-Path $Presets).Path, '--models-max', '1',
+            '--host', $Listen, '--port', "$Port", '--metrics') + $Extra
+  Start-Process -FilePath $server -ArgumentList $argv -WorkingDirectory $Dir -WindowStyle Hidden `
+    -RedirectStandardError (Join-Path $Dir 'chat.log') -RedirectStandardOutput (Join-Path $Dir 'chat.out.log') | Out-Null
+} else {
+  $argv = @('-m', $path, '--alias', $Alias, '--host', $Listen, '--port', "$Port",
+            '-ngl', "$GpuLayers", '-c', "$Context", '-np', "$Parallel", '--jinja', '--metrics') + $Extra
+  Start-Process -FilePath $server -ArgumentList $argv -WindowStyle Hidden `
+    -RedirectStandardError (Join-Path $Dir 'chat.log') | Out-Null
+}
 $deadline = (Get-Date).AddSeconds(120)
 while (-not (Test-Health $Port)) {
   if ((Get-Date) -gt $deadline) { throw "чат-модель не поднялась за две минуты — смотри $Dir\chat.log" }
   Start-Sleep -Milliseconds 500
 }
-Write-Host "чат-модель готова: http://${Listen}:$Port/v1 ($Model как $Alias, окно $Context)"
+if ($Router) {
+  Write-Host "роутер готов: http://${Listen}:$Port/v1, модели — пресеты из $Presets"
+} else {
+  Write-Host "чат-модель готова: http://${Listen}:$Port/v1 ($Model как $Alias, окно $Context)"
+}
