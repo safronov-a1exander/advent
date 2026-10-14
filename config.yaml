@@ -129,6 +129,29 @@ providers:
         url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
         description: окно меньше задачи — ответ обрывается
 
+  # Приватный сервис (день 30): та же Qwen3-4B, но через шлюз advent serve —
+  # с ключом, лимитами и по сети. Здесь адрес для этой машины; адрес в
+  # локальной сети (http://192.168.x.x:8095/v1) и ключ — в config.local.yaml
+  # или ADVENT_PRIVATE_KEY: ключ выдаёт `advent serve -new-key <имя>`.
+  - name: private
+    base_url: http://127.0.0.1:8095/v1
+    api_key_env: ADVENT_PRIVATE_KEY
+    default_model: qwen3-4b
+    thinking_via: chat_template_kwargs
+    models:
+      - id: qwen3-4b
+        label: Qwen3-4B через шлюз
+        tier: weak
+        params_b: 4
+        quant: q4_k_m
+        in_per_1m: 0
+        cached_in_per_1m: 0
+        out_per_1m: 0
+        max_context: 4096   # окно на запрос: -c 8192 на два слота (-np 2)
+        reasoning: true
+        url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+        description: модель шлюз выбирает сам — поле model клиента не учитывается
+
   # Заглушка `go run ./tools/mockllm` — репетиция демо и запись видео
   # без траты токенов. Цены выдуманы, чтобы колонка стоимости была не пустой.
   - name: mock

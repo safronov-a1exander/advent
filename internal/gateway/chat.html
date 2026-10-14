@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бюджет · приватная модель</title>
+<style>
+  :root { --bg:#f6f5f2; --fg:#1d1d1b; --dim:#77756f; --card:#fff; --line:#e2e0da; --acc:#2f6f4f; --err:#a33a2b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --fg:#ecebe7; --dim:#9a988f; --card:#202020; --line:#33322f; --acc:#6fbf94; --err:#e07a6a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display:flex; flex-direction:column; height:100dvh; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  header b { margin-right:auto; }
+  header input { width:12em; }
+  #log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .m { max-width:46em; padding:10px 14px; border-radius:12px; background:var(--card); border:1px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .u { align-self:flex-end; background:var(--acc); color:#fff; border-color:var(--acc); }
+  .e { color:var(--err); border-color:var(--err); }
+  .meta { font-size:12px; color:var(--dim); margin-top:4px; }
+  form { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  textarea { flex:1; resize:none; height:3.2em; }
+  input, textarea, button { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  button { background:var(--acc); color:#fff; border-color:var(--acc); cursor:pointer; }
+  button:disabled { opacity:.5; }
+</style>
+</head>
+<body>
+<header>
+  <b>Бюджет · приватная модель</b>
+  <input id="key" type="password" placeholder="ключ доступа" autocomplete="off">
+  <button id="clear" type="button">Новый разговор</button>
+</header>
+<div id="log"></div>
+<form id="f">
+  <textarea id="q" placeholder="Вопрос про траты…"></textarea>
+  <button id="send">Отправить</button>
+</form>
+<script>
+// Страница ходит в тот же OpenAI-совместимый /v1/chat/completions, что
+// и любой клиент: ключ в заголовке Authorization, ответ потоком SSE.
+const log = document.getElementById('log'), q = document.getElementById('q'),
+      key = document.getElementById('key'), send = document.getElementById('send');
+const system = 'Ты ассистент по личным финансам. Отвечай по-русски, коротко и по делу.';
+let history = [];
+try { key.value = localStorage.getItem('advent-key') || ''; } catch (e) {}
+key.addEventListener('change', () => { try { localStorage.setItem('advent-key', key.value); } catch (e) {} });
+document.getElementById('clear').onclick = () => { history = []; log.innerHTML = ''; };
+q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('f').requestSubmit(); } });
+
+function bubble(cls, text) {
+  const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+}
+
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const text = q.value.trim(); if (!text) return;
+  q.value = ''; send.disabled = true;
+  bubble('u', text);
+  history.push({role: 'user', content: text});
+  const out = bubble('a', '…'), t0 = performance.now();
+  let answer = '', tokens = 0;
+  try {
+    const r = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key.value},
+      body: JSON.stringify({messages: [{role: 'system', content: system}].concat(history), stream: true,
+                            temperature: 0.3, chat_template_kwargs: {enable_thinking: false}})
+    });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { msg += ': ' + (await r.json()).error.message; } catch (x) {}
+      throw new Error(msg);
+    }
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const {value, done} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim(); if (data === '[DONE]') continue;
+        const delta = (JSON.parse(data).choices[0] || {}).delta || {};
+        if (delta.content) { answer += delta.content; tokens++; out.textContent = answer; log.scrollTop = log.scrollHeight; }
+      }
+    }
+    history.push({role: 'assistant', content: answer});
+    const m = document.createElement('div'); m.className = 'meta';
+    m.textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' с · ' + tokens + ' фрагм.';
+    out.appendChild(m);
+  } catch (err) {
+    history.pop();
+    out.className = 'm e'; out.textContent = err.message;
+  }
+  send.disabled = false; q.focus();
+};
+</script>
+</body>
+</html>
