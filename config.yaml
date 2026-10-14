@@ -65,13 +65,42 @@ providers:
     default_model: deepseek/deepseek-chat
     models: []
 
-  # Локальный инференс (llama.cpp / vLLM / Ollama) — понадобится в неделю
-  # про локальные модели.
+  # Локальная модель (день 26): llama.cpp на этой машине, поднимает
+  # scripts/local-llm.ps1. Тот же /chat/completions, что у DeepSeek, —
+  # код клиента не меняется, меняется base_url. Ключ llama-server
+  # не проверяет, пока его не запустили с --api-key.
   - name: local
     base_url: http://127.0.0.1:8080/v1
     api_key_env: LOCAL_API_KEY
-    default_model: local-model
-    models: []
+    api_key: local
+    default_model: qwen3-4b
+    # Qwen3 переключает рассуждения шаблоном чата, а не полем thinking.
+    thinking_via: chat_template_kwargs
+    models:
+      - id: qwen3-4b
+        label: Qwen3-4B Q4_K_M
+        tier: weak
+        params_b: 4
+        quant: q4_k_m
+        in_per_1m: 0
+        cached_in_per_1m: 0
+        out_per_1m: 0
+        max_context: 8192   # окно, с которым поднят сервер (-c), а не предел модели
+        reasoning: true
+        url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+        description: 4 млрд параметров, 4-битная квантовка, 2.5 ГБ — влезает в 8 ГБ видеопамяти
+      - id: qwen3-4b-q8
+        label: Qwen3-4B Q8_0
+        tier: medium
+        params_b: 4
+        quant: q8_0
+        in_per_1m: 0
+        cached_in_per_1m: 0
+        out_per_1m: 0
+        max_context: 8192
+        reasoning: true
+        url: https://huggingface.co/Qwen/Qwen3-4B-GGUF
+        description: те же веса в 8 бит, 4.3 ГБ — для сравнения квантований
 
   # Заглушка `go run ./tools/mockllm` — репетиция демо и запись видео
   # без траты токенов. Цены выдуманы, чтобы колонка стоимости была не пустой.

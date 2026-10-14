@@ -21,6 +21,10 @@ type Client struct {
 	apiKey  string
 	http    *http.Client
 	pricing map[string]ModelInfo
+	// templateThinking — режим рассуждений передаётся не полем thinking
+	// (DeepSeek), а переменной шаблона чата: так его понимает llama.cpp
+	// с --jinja (Qwen3 и подобные, день 26).
+	templateThinking bool
 }
 
 type ClientOption func(*Client)
@@ -30,6 +34,10 @@ func WithHTTPClient(h *http.Client) ClientOption { return func(c *Client) { c.ht
 func WithPricing(p map[string]ModelInfo) ClientOption {
 	return func(c *Client) { c.pricing = p }
 }
+
+// WithTemplateThinking — переключать рассуждения через
+// chat_template_kwargs.enable_thinking (llama.cpp), а не поле thinking.
+func WithTemplateThinking() ClientOption { return func(c *Client) { c.templateThinking = true } }
 
 func New(name, baseURL, apiKey string, opts ...ClientOption) *Client {
 	c := &Client{
@@ -62,6 +70,8 @@ type wireReq struct {
 	Stream         bool            `json:"stream,omitempty"`
 	StreamOptions  *streamOpts     `json:"stream_options,omitempty"`
 	Tools          []Tool          `json:"tools,omitempty"`
+	// ChatTemplateKwargs — переменные шаблона чата у llama.cpp (день 26).
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 type streamOpts struct {
@@ -147,6 +157,10 @@ func (c *Client) buildWire(req Request, stream bool) wireReq {
 	}
 	if stream {
 		w.StreamOptions = &streamOpts{IncludeUsage: true}
+	}
+	if c.templateThinking && req.Thinking != nil {
+		w.ChatTemplateKwargs = map[string]any{"enable_thinking": req.Thinking.Type != "disabled"}
+		w.Thinking = nil
 	}
 	return w
 }
