@@ -56,11 +56,55 @@ func buildPrompt(in Input, checks []Check, ctxHits []rag.Hit, maxDiff int) strin
 			}
 		}
 	}
-	diff := in.Diff
-	if utf8.RuneCountInString(diff) > maxDiff {
-		diff = clipRunes(diff, maxDiff) + "\n… diff обрезан: показано " + fmt.Sprint(maxDiff) + " символов"
+	b.WriteString("\nDiff:\n" + fitDiff(in.Diff, maxDiff))
+	return b.String()
+}
+
+// fitDiff — diff в бюджет символов так, чтобы каждый файл попал к модели.
+//
+// Сначала diff просто обрезался по длине. На PR #32 (91 925 символов при
+// бюджете 60 000) хвост с internal/servers/gitrepo/gitrepo.go модель не
+// увидела вовсе. Об этом файле она судила по устаревшему фрагменту из базы
+// знаний и «нашла» уже исправленный баг. Теперь бюджет делится между
+// файлами: короткие идут целиком, длинные режутся поровну, и у каждого
+// видно, что обрезано.
+func fitDiff(diff string, max int) string {
+	if utf8.RuneCountInString(diff) <= max {
+		return diff
 	}
-	b.WriteString("\nDiff:\n" + diff)
+	parts := strings.SplitAfter(diff, "\ndiff --git ")
+	// SplitAfter оставляет разделитель в конце куска — переносим его
+	// в начало следующего, чтобы у каждого файла был свой заголовок.
+	files := make([]string, 0, len(parts))
+	for i, p := range parts {
+		if i > 0 {
+			p = "diff --git " + p
+		}
+		files = append(files, strings.TrimSuffix(p, "\ndiff --git "))
+	}
+	// Делим поровну, а то, что не съели короткие файлы, отдаём длинным.
+	share := max / len(files)
+	spare, long := 0, 0
+	for _, f := range files {
+		if n := utf8.RuneCountInString(f); n <= share {
+			spare += share - n
+		} else {
+			long++
+		}
+	}
+	if long > 0 {
+		share += spare / long
+	}
+	var b strings.Builder
+	for _, f := range files {
+		n := utf8.RuneCountInString(f)
+		if n <= share {
+			b.WriteString(f + "\n")
+			continue
+		}
+		b.WriteString(clipRunes(f, share))
+		fmt.Fprintf(&b, "\n… файл обрезан: показано %d из %d символов\n", share, n)
+	}
 	return b.String()
 }
 

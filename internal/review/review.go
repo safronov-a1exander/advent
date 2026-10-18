@@ -388,6 +388,10 @@ func sevRank(s string) int {
 // и по запросу на каждый изменённый файл — связанный код и документация.
 func gather(ctx context.Context, kb Knowledge, files []File, logf func(string, ...any)) (hits []rag.Hit, rules, related int) {
 	seen := map[string]bool{}
+	changed := map[string]bool{}
+	for _, f := range files {
+		changed[f.Path] = true
+	}
 	take := func(q string, k int) int {
 		res, err := kb.Retrieve(ctx, q, rag.Options{TopK: k, Candidates: 10, Rerank: true, MinRerank: 0.05})
 		if err != nil {
@@ -396,7 +400,10 @@ func gather(ctx context.Context, kb Knowledge, files []File, logf func(string, .
 		}
 		n := 0
 		for _, h := range res.Kept {
-			if seen[h.ID] {
+			// Изменённые файлы модель видит в diff, в их версии из PR. Индекс
+			// собран раньше, и его фрагмент этих файлов — устаревшая версия:
+			// на PR #32 модель по нему нашла уже исправленный баг.
+			if seen[h.ID] || changed[h.Source] {
 				continue
 			}
 			seen[h.ID] = true

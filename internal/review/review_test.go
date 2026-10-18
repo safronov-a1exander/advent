@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
+	"github.com/safronov-a1exander/advent/internal/rag"
 )
 
 var sampleDiff = `diff --git a/internal/x/x.go b/internal/x/x.go
@@ -165,6 +166,38 @@ func TestFallbackModelThenHumanWhenAllFail(t *testing.T) {
 	md := res.Markdown()
 	if !res.Failed || !strings.Contains(md, "нужен человек") || !strings.Contains(md, "Проверки кодом") {
 		t.Fatalf("без модели ревью всё равно выходит — с проверками и просьбой к человеку:\n%s", md)
+	}
+}
+
+func TestFitDiffKeepsEveryFile(t *testing.T) {
+	big := "diff --git a/a.go b/a.go\n+++ b/a.go\n" + strings.Repeat("+строка кода\n", 2000)
+	small := "diff --git a/z.go b/z.go\n+++ b/z.go\n+хвост\n"
+	got := fitDiff(big+small, 3000)
+	if !strings.Contains(got, "b/z.go") || !strings.Contains(got, "+хвост") {
+		t.Fatal("файл в хвосте diff должен попасть к модели целиком")
+	}
+	if !strings.Contains(got, "файл обрезан") || len([]rune(got)) > 3300 {
+		t.Fatalf("длинный файл режется с пометкой, итог в бюджете: %d", len([]rune(got)))
+	}
+	if !strings.HasPrefix(got, "diff --git a/a.go") || strings.Count(got, "diff --git") != 2 {
+		t.Fatal("у каждого файла свой заголовок")
+	}
+}
+
+type staticKB struct{ hits []rag.Hit }
+
+func (k staticKB) Retrieve(_ context.Context, q string, _ rag.Options) (*rag.Result, error) {
+	return &rag.Result{Query: q, Kept: k.hits}, nil
+}
+
+func TestGatherSkipsStaleChunksOfChangedFiles(t *testing.T) {
+	kb := staticKB{hits: []rag.Hit{
+		{Chunk: rag.Chunk{ID: "internal/x/x.go#0", Source: "internal/x/x.go"}},
+		{Chunk: rag.Chunk{ID: "docs/REVIEW.md#1", Source: "docs/REVIEW.md"}},
+	}}
+	hits, _, _ := gather(context.Background(), kb, ParseDiff(sampleDiff), func(string, ...any) {})
+	if len(hits) != 1 || hits[0].Source != "docs/REVIEW.md" {
+		t.Fatalf("фрагмент изменённого файла из индекса — устаревшая версия: %+v", hits)
 	}
 }
 
