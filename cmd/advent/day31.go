@@ -77,6 +77,12 @@ func devHelp(hub *mcp.Hub) *tui.Help {
 		return h
 	}
 	h.Context = func(ctx context.Context) (string, error) {
+		// Хаб поднимает сервер лениво — при первом запросе списка функций.
+		// /help может прийти раньше первого вопроса модели, и тогда Call
+		// честно отвечал «функции нет среди доступных».
+		if _, err := hub.Functions(ctx, []string{"git"}); err != nil {
+			return "", err
+		}
 		out := hub.Call(ctx, "git"+mcp.Sep+"branch", "{}", []string{"git"})
 		if out.IsError {
 			return "", fmt.Errorf("%s", strings.TrimSpace(out.Text))

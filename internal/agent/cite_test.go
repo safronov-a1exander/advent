@@ -234,3 +234,66 @@ func TestRenderShowsFewVerbatimQuotesButAllBroken(t *testing.T) {
 		t.Fatalf("непроверенная цитата и счёт скрытых должны быть видны:\n%s", got)
 	}
 }
+
+// toolsRouteLLM: rewrite с инструментами отвечает TOOLS, ответ — текстом.
+type toolsRouteLLM struct{ sawTools bool }
+
+func (r *toolsRouteLLM) Name() string                                 { return "tr" }
+func (r *toolsRouteLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (r *toolsRouteLLM) ChatStream(ctx context.Context, q llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return r.Chat(ctx, q)
+}
+func (r *toolsRouteLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
+	if strings.HasPrefix(q.Messages[0].Content, "Ты переписываешь вопрос") {
+		r.sawTools = strings.Contains(q.Messages[0].Content, "rates.convert")
+		return &llm.Response{Content: "TOOLS"}, nil
+	}
+	return &llm.Response{Content: "Сейчас 840 рублей."}, nil
+}
+
+func TestRewriteRoutesStateQuestionsToTools(t *testing.T) {
+	m := &toolsRouteLLM{}
+	kb := &countKB{}
+	p := NewPool(m, "tr", nil)
+	p.SetKnowledge(kb)
+	p.SetToolbox(&fakeBox{})
+	a := p.SpawnTemp(Config{Model: "m", MCP: []string{"rates"}, RAG: "on", RAGRewrite: true, RAGCite: true})
+	reply, err := a.Ask(context.Background(), "сколько сейчас 10 долларов?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.sawTools {
+		t.Fatal("rewrite должен знать, какие инструменты есть")
+	}
+	if n := kb.calls.Load(); n != 0 {
+		t.Fatalf("при TOOLS в базе не ищут, а поисков %d", n)
+	}
+	if !strings.HasSuffix(reply.Final.Content, ToolsSource) {
+		t.Fatalf("источник — инструменты: %q", reply.Final.Content)
+	}
+}
+
+func TestRewriteWithoutToolsHasNoToolsRoute(t *testing.T) {
+	m := &toolsRouteLLM{}
+	kb := &countKB{}
+	p := NewPool(m, "tr", nil)
+	p.SetKnowledge(kb)
+	a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGRewrite: true})
+	if _, err := a.Ask(context.Background(), "сколько сейчас 10 долларов?", nil); err != nil {
+		t.Fatal(err)
+	}
+	if kb.calls.Load() != 1 {
+		t.Fatal("без инструментов TOOLS — просто строка запроса, поиск идёт как раньше")
+	}
+}
+
+func TestQuoteAcrossListItemsIsVerbatim(t *testing.T) {
+	src := "- **internal/llm** — клиент, учёт токенов и стоимости.\n- **internal/config** — `config.yaml` и переменные окружения."
+	q := "**internal/llm** — клиент, учёт токенов и стоимости. **internal/config** — `config.yaml` и переменные окружения."
+	if !strings.Contains(squashQuote(src), squashQuote(q)) {
+		t.Fatalf("склеенные пункты списка — дословная цитата:\n%q\n%q", squashQuote(src), squashQuote(q))
+	}
+	if strings.Contains(squashQuote("стоимость - 5 рублей"), squashQuote("стоимость 5 рублей")) {
+		t.Fatal("тире внутри строки — не маркер списка")
+	}
+}

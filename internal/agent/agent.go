@@ -466,7 +466,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	// День 22: фрагменты базы знаний — до оценки размера: они едут
 	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
-	found, skipped := a.retrieve(ctx, cfg, mem, hist, text, &turn, on)
+	found, skip := a.retrieve(ctx, cfg, mem, hist, text, funcs, &turn, on)
 	var hits []rag.Hit
 	if found != nil {
 		hits = found.Kept
@@ -584,9 +584,10 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// не увидит, неправильно.
 	// День 25: в базе не искали — вопрос о самом разговоре. Источник
 	// всё равно называется: разговор и память задачи.
-	if skipped {
-		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + ConversationSource
-		on(Event{Kind: EventChunk, Content: "\n\n" + ConversationSource})
+	// День 31: не искали, потому что отвечают инструменты.
+	if src := skipSource(skip); src != "" {
+		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + src
+		on(Event{Kind: EventChunk, Content: "\n\n" + src})
 	}
 
 	if noDocs {
@@ -698,4 +699,15 @@ func (a *Agent) record(req llm.Request, resp *llm.Response, err error, label str
 		rec.CostUSD = resp.CostUSD
 	}
 	_ = a.journal.Append(rec)
+}
+
+// skipSource — подпись источника, когда в базе не искали.
+func skipSource(s Skip) string {
+	switch s {
+	case SkipConversation:
+		return ConversationSource
+	case SkipTools:
+		return ToolsSource
+	}
+	return ""
 }

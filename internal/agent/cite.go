@@ -335,7 +335,15 @@ func bestFirst(hits []rag.Hit, byRerank bool) []rag.Hit {
 // squashQuote — текст для сверки цитаты: без разметки markdown, кавычек
 // и лишних пробелов, в нижнем регистре, ё = е. Модель вправе убрать
 // звёздочки жирного и заменить кавычки, но не слова.
+//
+// День 31: маркеры пунктов списка в начале строк тоже убираются. Модель
+// цитирует два соседних пункта одной строкой и маркер между ними
+// выбрасывает: «…стоимости. **internal/config**» против «…стоимости.»,
+// перевод строки, «- **internal/config**» в источнике. Это та же цитата,
+// а не пересказ.
 func squashQuote(s string) string {
+	s = listMarkRe.ReplaceAllString(s, "")
+	s = listMarkRe.ReplaceAllString(s, "")
 	r := strings.NewReplacer("**", "", "`", "", "«", "", "»", "", "\"", "", "„", "", "“", "", "ё", "е", "Ё", "е", "—", "-", "–", "-", " ", " ", " ", " ")
 	s = strings.ToLower(r.Replace(s))
 	s = strings.Join(strings.Fields(s), " ")
@@ -417,3 +425,6 @@ func (a *Agent) JudgeCitation(ctx context.Context, c *Citation) (*Verdict, float
 	}
 	return &v, resp.CostUSD, nil
 }
+
+// listMarkRe — маркер пункта списка в начале строки: «- », «* », «2. ».
+var listMarkRe = regexp.MustCompile(`(?m)^[ \t]*(?:[-*+]|\d{1,2}[.)])[ \t]+`)
