@@ -7,6 +7,8 @@ config.local.yaml
 /bin/
 /advent
 /advent.exe
+# go build на Windows отодвигает запущенный бинарь в *.exe~
+*.exe~
 
 # run artifacts
 /runs/

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поддержка · Приватная модель</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --dim:#6b7385; --line:#e3e6ec; --accent:#2f6fdb; --me:#e8f0fd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --card:#1d2129; --ink:#e7eaf0; --dim:#9aa3b5; --line:#2c323d; --accent:#6f9ff0; --me:#22324d; } }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  header b { font-size:17px } header span { color:var(--dim); margin-left:8px }
+  main { display:grid; grid-template-columns:280px 1fr; height:calc(100vh - 52px); }
+  @media (max-width:720px) { main { grid-template-columns:1fr; height:auto } aside { max-height:220px } }
+  aside { border-right:1px solid var(--line); overflow:auto; background:var(--card); }
+  .t { padding:12px 16px; border-bottom:1px solid var(--line); cursor:pointer }
+  .t:hover, .t.on { background:var(--me) }
+  .t small { color:var(--dim); display:block }
+  .st { display:inline-block; font-size:12px; padding:1px 6px; border-radius:8px; border:1px solid var(--line); margin-left:6px }
+  section { display:flex; flex-direction:column; min-height:0 }
+  #log { flex:1; overflow:auto; padding:16px 20px }
+  .m { max-width:760px; margin:0 0 12px; padding:10px 14px; border-radius:12px; background:var(--card); border:1px solid var(--line); white-space:pre-wrap }
+  .m.me { background:var(--me); margin-left:auto }
+  .meta { color:var(--dim); font-size:12px; margin-top:6px; white-space:normal }
+  form { display:flex; gap:8px; padding:12px 20px; border-top:1px solid var(--line); background:var(--card) }
+  textarea { flex:1; resize:none; height:44px; padding:10px; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px }
+  button { padding:0 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; cursor:pointer }
+  button:disabled { opacity:.5 }
+  .empty { color:var(--dim); padding:40px 20px }
+</style>
+</head>
+<body>
+<header><b>Поддержка</b><span>Приватная модель — домашний сервер</span></header>
+<main>
+  <aside id="list"></aside>
+  <section>
+    <div id="log"><div class="empty">Выберите обращение слева.</div></div>
+    <form id="f"><textarea id="q" placeholder="Сообщение в поддержку… (Enter — отправить)" disabled></textarea><button id="b" disabled>Отправить</button></form>
+  </section>
+</main>
+<script>
+let ticket = "";
+const log = document.getElementById("log"), q = document.getElementById("q"), b = document.getElementById("b");
+function el(cls, text) { const d = document.createElement("div"); d.className = cls; d.textContent = text; return d; }
+function add(cls, text, meta) {
+  const m = el("m " + cls, text);
+  if (meta) m.appendChild(el("meta", meta));
+  log.appendChild(m); log.scrollTop = log.scrollHeight;
+}
+async function tickets() {
+  const r = await fetch("/api/tickets"); const rows = await r.json();
+  const list = document.getElementById("list"); list.textContent = "";
+  for (const t of rows) {
+    const d = el("t" + (t.ID === ticket ? " on" : ""), t.ID + " · " + t.Subject);
+    const s = el("st", t.Status); d.appendChild(s);
+    const sm = document.createElement("small"); sm.textContent = t.Author + " · " + t.Created; d.appendChild(sm);
+    d.onclick = () => { ticket = t.ID; log.textContent = ""; add("", "Обращение " + t.ID + ": " + t.Subject); q.disabled = b.disabled = false; q.focus(); tickets(); };
+    list.appendChild(d);
+  }
+}
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const text = q.value.trim(); if (!text || !ticket) return;
+  q.value = ""; add("me", text); b.disabled = true;
+  try {
+    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticket, text }) });
+    const j = await r.json();
+    if (!r.ok) { add("", "Ошибка: " + j.error); }
+    else {
+      const meta = [];
+      if (j.Tools && j.Tools.length) meta.push("CRM: " + j.Tools.map(t => t.Name + (t.Failed ? " ✗" : "")).join(", "));
+      if (j.Sources && j.Sources.length) meta.push("FAQ: " + j.Sources.join("; "));
+      meta.push(j.Took);
+      add("", j.Answer, meta.join(" · "));
+    }
+  } catch (err) { add("", "Сервис недоступен: " + err); }
+  b.disabled = false; tickets();
+};
+q.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("f").requestSubmit(); } });
+tickets();
+</script>
+</body>
+</html>
