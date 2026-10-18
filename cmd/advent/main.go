@@ -54,6 +54,7 @@ func usage() {
   serve     приватный сервис: шлюз с ключами и лимитами перед моделью (день 30)
   load      проверка сервиса по сети: параллельно, очередь, окно, лимит (день 30)
   dev       ассистент разработчика: /help по документации и git проекта (день 31)
+  review    AI-ревью PR или ветки: diff, RAG, проверки кодом, комментарий в PR (день 32)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -80,6 +81,8 @@ func run() error {
 		return cmdAsk(ctx, args)
 	case "dev":
 		return cmdDev(ctx, args)
+	case "review":
+		return cmdReview(ctx, args)
 	case "chat":
 		return cmdChat(ctx, args)
 	case "demo":

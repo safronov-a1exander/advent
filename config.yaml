@@ -313,6 +313,19 @@ rag:
         - internal/servers/**/*.go
       exclude:
         - "**/*_test.go"
+    # Ревью PR (день 32): правила ревью проекта, документация об устройстве
+    # и весь код — по нему ищется то, что связано с изменёнными файлами.
+    review:
+      include:
+        - docs/REVIEW.md
+        - docs/ARCHITECTURE.md
+        - README.md
+        - config.yaml
+        - cmd/**/*.go
+        - internal/**/*.go
+        - tools/**/*.go
+      exclude:
+        - "**/*_test.go"
   chunking:
     size: 1200     # fixed: окно в символах
     overlap: 200   # fixed: перекрытие соседних окон
