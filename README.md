@@ -52,7 +52,7 @@ sessions/            сохранённые разговоры агентов  (
 Один шаг — одна ветка, каждая ответвляется от предыдущей:
 
 ```
-main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → day-24 → day-25 → day-26 → day-27 → day-28 → day-29 → day-30 → day-31 → day-32 → day-33 → day-34
+main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements → day-06 → day-07 → day-08 → day-09 → day-10 → day-11 → day-12 → day-13 → day-14 → day-15 → day-16 → day-17 → day-18 → day-19 → day-20 → day-21 → day-22 → day-23 → day-24 → day-25 → day-26 → day-27 → day-28 → day-29 → day-30 → day-31 → day-32 → day-33 → day-34 → day-35
 ```
 
 `main` — только инфраструктура. Код шага N содержит весь код шагов 1…N-1,
@@ -95,6 +95,7 @@ main → day-01 → day-02 → day-03 → day-04 → day-05 → improvements →
 | 32 | `day-32` | автоматическое ревью кода `advent review`: наблюдатель за PR, RAG по правилам и diff, проверки кодом, метрики | `docs/days/day32.md` |
 | 33 | `day-33` | ассистент поддержки `advent support`: FAQ в базе, MCP-сервер CRM, инварианты, страница и чат по обращению | `docs/days/day33.md` |
 | 34 | `day-34` | ассистент для файлов проекта `advent files`: поиск, чтение, правки в черновик, diff, `-apply` человеком | `docs/days/day34.md` |
+| 35 | `day-35` | сдача дня челленджа `advent ship`: проверки кодом, субагенты веером, план публикации, подтверждение человеком | `docs/days/day35.md` |
 
 Пошаговый порядок от ключа до записи — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
