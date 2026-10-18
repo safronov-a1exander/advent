@@ -890,6 +890,7 @@ func (m *Model) layout() {
 	}
 	m.ta.SetWidth(m.w - 4)
 	m.notes.SetSize(m.w-4, notesHeight)
+	m.panel.SetHeight(vpH)
 	m.refreshPanelWidth()
 }
 
@@ -955,6 +956,9 @@ func (m *Model) View() tea.View {
 		case focusMemory:
 			side = m.memoryView(pw - 2)
 		}
+		// Боковая колонка не выше ленты: иначе она вытягивает экран вниз,
+		// и блокнот с полем ввода уезжают за край окна (день 31).
+		side = clipHeight(side, m.vp.Height())
 		panel := m.frame(m.focus != focusInput && m.focus != focusNotes).Width(pw).Render(side)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, transcript, panel)
 	}
@@ -1088,4 +1092,15 @@ func stageMoves(tk *task.Task) string {
 		line += fmt.Sprintf(" · отказов: %d", n)
 	}
 	return line
+}
+
+// clipHeight — не больше h строк и без пустой строки в конце: она тоже
+// занимает строку экрана. Обрезанное помечается последней строкой.
+func clipHeight(s string, h int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if h <= 0 || len(lines) <= h {
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines[:h-1], stDim.Render(fmt.Sprintf("  … ещё %d строк", len(lines)-h+1)))
+	return strings.Join(lines, "\n")
 }
