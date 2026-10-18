@@ -19,6 +19,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/servers/budget"
+	"github.com/safronov-a1exander/advent/internal/servers/crm"
 	"github.com/safronov-a1exander/advent/internal/servers/gitrepo"
 	"github.com/safronov-a1exander/advent/internal/servers/goals"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
@@ -38,6 +39,8 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 	goalsData := fs.String("goals", "runs/mcp/goals.json", "goals: файл целей (день 20)")
 	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
 	repoRoot := fs.String("repo", ".", "git: каталог репозитория (день 31)")
+	crmSeed := fs.String("crm", "data/support/crm.json", "crm: исходные данные CRM в репозитории (день 33)")
+	crmState := fs.String("crm-state", "runs/support/crm.json", "crm: рабочая копия — сюда пишутся заметки и статусы")
 	// Имя сервера — первый аргумент, флаги можно писать и после него.
 	name := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -81,8 +84,14 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 		srv = g
 	case "git":
 		srv = gitrepo.New(*repoRoot)
+	case "crm":
+		st, err := crm.Open(*crmSeed, *crmState, nil)
+		if err != nil {
+			return err
+		}
+		srv = crm.New(st)
 	default:
-		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals, git", name)
+		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals, git, crm", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.

@@ -86,6 +86,11 @@ type askFlags struct {
 	// devHelp — ассистент разработчика (день 31): база знаний включается
 	// только на /help, состояние git код берёт сам.
 	devHelp bool
+	// toolWrap — обёртка над инструментами MCP (день 33): поддержка
+	// ограничивает CRM своим обращением.
+	toolWrap func(agent.Toolbox) agent.Toolbox
+	// ragExpand — раздел целиком без остального мини-чата дня 25 (день 33).
+	ragExpand bool
 	// ragRerank и ragRewrite — второй этап поиска (день 23).
 	ragRerank  bool
 	ragRewrite bool
@@ -428,7 +433,11 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 		}
 		hub = mcp.NewHub(a.cfg.MCPServers)
 		defer hub.Close()
-		pool.SetToolbox(hub)
+		var tb agent.Toolbox = hub
+		if a.toolWrap != nil {
+			tb = a.toolWrap(hub)
+		}
+		pool.SetToolbox(tb)
 		set.MCP = servers
 	}
 
@@ -461,7 +470,7 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	}
 	set.RAGRewrite = a.ragRewrite
 	set.RAGCite = a.ragCite
-	set.RAGExpand = a.ragChat
+	set.RAGExpand = a.ragChat || a.ragExpand
 
 	// День 27: всё приложение без облака — проверка до первого запроса.
 	if a.offline {
