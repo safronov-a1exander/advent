@@ -81,6 +81,11 @@ type askFlags struct {
 	// offline — день 27: чат стартует, только если все адреса в своей сети.
 	offline  bool
 	embedder string
+	// kb — отдельная база знаний из rag.bases (день 31).
+	kb string
+	// devHelp — ассистент разработчика (день 31): база знаний включается
+	// только на /help, состояние git код берёт сам.
+	devHelp bool
 	// ragRerank и ragRewrite — второй этап поиска (день 23).
 	ragRerank  bool
 	ragRewrite bool
@@ -127,6 +132,7 @@ func bindAsk(fs *flag.FlagSet) *askFlags {
 	fs.BoolVar(&a.ragChat, "rag-chat", false, "мини-чат с базой знаний (день 25): реранк, rewrite, цитаты, раздел целиком; с -task — ещё и память задачи (-memory auto)")
 	fs.BoolVar(&a.ragCite, "rag-cite", false, "ответ с источниками и дословными цитатами, «не знаю» при пустом поиске (день 24); включает -rag")
 	fs.StringVar(&a.embedder, "embedder", "", "модель эмбеддингов из config.yaml для -rag (пусто — rag.embedder; на провайдере mock — mock)")
+	fs.StringVar(&a.kb, "kb", "", "база знаний из rag.bases для -rag (день 31); пусто — основная rag.sources")
 	fs.StringVar(&a.memoryDir, "memory-dir", "", "каталог слоёв памяти (по умолчанию memory_dir из config.yaml)")
 	return a
 }
@@ -413,13 +419,14 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	// День 17: инструменты MCP. Соединение с сервером одно на процесс,
 	// поднимается при первом вопросе агента и закрывается на выходе —
 	// локальный сервер-подпроцесс уходит вместе с чатом.
+	var hub *mcp.Hub
 	if servers := splitList(a.mcp); len(servers) > 0 {
 		for _, s := range servers {
 			if _, err := a.cfg.MCPServer(s); err != nil {
 				return fmt.Errorf("-mcp: %w", err)
 			}
 		}
-		hub := mcp.NewHub(a.cfg.MCPServers)
+		hub = mcp.NewHub(a.cfg.MCPServers)
 		defer hub.Close()
 		pool.SetToolbox(hub)
 		set.MCP = servers
@@ -439,7 +446,7 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	if a.ragRerank || a.ragRewrite || a.ragCite {
 		a.rag = true
 	}
-	kb, err := knowledgeFor(a.cfg, a.embedder, a.provider)
+	kb, err := knowledgeFor(a.cfg, a.embedder, a.provider, a.kb)
 	switch {
 	case err == nil:
 		pool.SetKnowledge(kb)
@@ -463,6 +470,15 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 			return err
 		}
 		opts.Notice = strings.TrimSpace(where + "\n" + opts.Notice)
+	}
+
+	// День 31: ассистент разработчика. База подключена, но поиск идёт
+	// только на /help: обычная реплика — разговор с инструментами git.
+	if a.devHelp {
+		opts.Help = devHelp(hub)
+		set.RAG = ""
+		set.RAGOpen = true
+		set.RAGRerankQuestion = true
 	}
 
 	m := tui.NewModel(opts)

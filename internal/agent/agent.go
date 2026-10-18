@@ -466,7 +466,7 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 
 	// День 22: фрагменты базы знаний — до оценки размера: они едут
 	// в запросе вместе с вопросом. В историю ляжет голый вопрос.
-	found, skipped := a.retrieve(ctx, cfg, mem, hist, text, &turn, on)
+	found, skip := a.retrieve(ctx, cfg, mem, hist, text, funcs, &turn, on)
 	var hits []rag.Hit
 	if found != nil {
 		hits = found.Kept
@@ -477,6 +477,12 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// и проверяет, — потоком его показывать нельзя. А если ни один фрагмент
 	// не прошёл порог, модель не спрашивают вовсе: «не знаю» говорит код.
 	cite := cfg.RAG != "" && cfg.RAGCite && found != nil
+	// День 31: с RAGOpen пустой поиск — не отказ, а ход без документации.
+	noDocs := cite && len(hits) == 0 && cfg.RAGOpen
+	if noDocs {
+		cite = false
+		question = NoDocsNote + "\n\n" + text
+	}
 	if cite && len(hits) == 0 {
 		content := dontKnow(cfg, found)
 		on(Event{Kind: EventChunk, Content: content})
@@ -578,9 +584,15 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// не увидит, неправильно.
 	// День 25: в базе не искали — вопрос о самом разговоре. Источник
 	// всё равно называется: разговор и память задачи.
-	if skipped {
-		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + ConversationSource
-		on(Event{Kind: EventChunk, Content: "\n\n" + ConversationSource})
+	// День 31: не искали, потому что отвечают инструменты.
+	if src := skipSource(skip); src != "" {
+		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + src
+		on(Event{Kind: EventChunk, Content: "\n\n" + src})
+	}
+
+	if noDocs {
+		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + NoDocsSource
+		on(Event{Kind: EventChunk, Content: "\n\n" + NoDocsSource})
 	}
 
 	// День 24: JSON с источниками и цитатами — в текст для человека,
@@ -687,4 +699,15 @@ func (a *Agent) record(req llm.Request, resp *llm.Response, err error, label str
 		rec.CostUSD = resp.CostUSD
 	}
 	_ = a.journal.Append(rec)
+}
+
+// skipSource — подпись источника, когда в базе не искали.
+func skipSource(s Skip) string {
+	switch s {
+	case SkipConversation:
+		return ConversationSource
+	case SkipTools:
+		return ToolsSource
+	}
+	return ""
 }

@@ -215,6 +215,9 @@ func ParseCitation(content, question string, hits []rag.Hit) *Citation {
 
 // Render — то, что увидит пользователь и что ляжет в историю: ответ,
 // источники с разделами, цитаты и итог проверки.
+// MaxShownQuotes — сколько дословных цитат показывать под ответом (день 31).
+const MaxShownQuotes = 4
+
 func (c *Citation) Render(hits []rag.Hit) string {
 	if c.Malformed {
 		return c.Answer
@@ -240,12 +243,25 @@ func (c *Citation) Render(hits []rag.Hit) string {
 	}
 	if len(c.Quotes) > 0 {
 		b.WriteString("\n\nЦитаты:")
+		// День 31: на обзорный вопрос модель приносит по цитате на каждый
+		// пункт, и полтора десятка строк выталкивают сам ответ за край
+		// экрана. Непроверенные видны всегда, дословных — первые
+		// MaxShownQuotes; проверка ниже считает все.
+		shown, hidden := 0, 0
 		for _, q := range c.Quotes {
 			mark := ""
 			if !q.Verbatim {
 				mark = " ✗ нет во фрагменте"
+			} else if shown >= MaxShownQuotes {
+				hidden++
+				continue
+			} else {
+				shown++
 			}
 			fmt.Fprintf(&b, "\n- [%s] «%s»%s", q.ID, oneLineText(q.Text), mark)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(&b, "\n- … и ещё %d — тоже дословно", hidden)
 		}
 	}
 	if p := c.Problems(); len(p) > 0 {
@@ -319,7 +335,14 @@ func bestFirst(hits []rag.Hit, byRerank bool) []rag.Hit {
 // squashQuote — текст для сверки цитаты: без разметки markdown, кавычек
 // и лишних пробелов, в нижнем регистре, ё = е. Модель вправе убрать
 // звёздочки жирного и заменить кавычки, но не слова.
+//
+// День 31: маркеры пунктов списка в начале строк тоже убираются. Модель
+// цитирует два соседних пункта одной строкой и маркер между ними
+// выбрасывает: «…стоимости. **internal/config**» против «…стоимости.»,
+// перевод строки, «- **internal/config**» в источнике. Это та же цитата,
+// а не пересказ.
 func squashQuote(s string) string {
+	s = listMarkRe.ReplaceAllString(s, "")
 	r := strings.NewReplacer("**", "", "`", "", "«", "", "»", "", "\"", "", "„", "", "“", "", "ё", "е", "Ё", "е", "—", "-", "–", "-", " ", " ", " ", " ")
 	s = strings.ToLower(r.Replace(s))
 	s = strings.Join(strings.Fields(s), " ")
@@ -401,3 +424,6 @@ func (a *Agent) JudgeCitation(ctx context.Context, c *Citation) (*Verdict, float
 	}
 	return &v, resp.CostUSD, nil
 }
+
+// listMarkRe — маркер пункта списка в начале строки: «- », «* », «2. ».
+var listMarkRe = regexp.MustCompile(`(?m)^[ \t]*(?:[-*+]|\d{1,2}[.)])[ \t]+`)

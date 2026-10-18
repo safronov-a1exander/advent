@@ -36,6 +36,7 @@ func cmdIndex(ctx context.Context, args []string) error {
 	show := fs.Int("show", 0, "с -dry: напечатать первые N чанков каждой стратегии")
 	only := fs.String("source", "", "с -dry: только этот файл, например docs/days/day20.md")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом — для записи видео")
+	base := fs.String("base", "", "отдельная база из rag.bases (день 31); пусто — основная")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -49,7 +50,11 @@ func cmdIndex(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	docs, err := rag.Load(c.dir, cfg.RAG.Sources)
+	sources, indexDir, err := cfg.Base(*base)
+	if err != nil {
+		return err
+	}
+	docs, err := rag.Load(c.dir, sources)
 	if err != nil {
 		return err
 	}
@@ -114,7 +119,7 @@ func cmdIndex(ctx context.Context, args []string) error {
 			return err
 		}
 		ix.Tokens = emb.Tokens - before
-		path := rag.Path(cfg.RAG.IndexDir, emb.Name(), st)
+		path := rag.Path(indexDir, emb.Name(), st)
 		if err := ix.Save(path); err != nil {
 			return err
 		}
@@ -244,6 +249,7 @@ func cmdSearch(ctx context.Context, args []string) error {
 	full := fs.Bool("full", false, "печатать чанк целиком")
 	rerank := fs.Bool("rerank", false, "переоценить найденное реранкером и упорядочить по его оценке (день 23)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране перед выходом")
+	base := fs.String("base", "", "отдельная база из rag.bases (день 31)")
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return err
 	}
@@ -270,7 +276,11 @@ func cmdSearch(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ix, err := rag.Open(rag.Path(cfg.RAG.IndexDir, emb.Name(), st))
+	_, indexDir, err := cfg.Base(*base)
+	if err != nil {
+		return err
+	}
+	ix, err := rag.Open(rag.Path(indexDir, emb.Name(), st))
 	if err != nil {
 		return err
 	}

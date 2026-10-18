@@ -70,6 +70,11 @@ type Settings struct {
 	RAGCite bool
 	// День 25 — раздел целиком вместо найденного куска.
 	RAGExpand bool
+	// RAGOpen — пустой поиск с цитатами не отказ, а ход без документации
+	// (день 31). В панели не показывается: это свойство ассистента, а не ручка.
+	RAGOpen bool
+	// RAGRerankQuestion — реранк по вопросу вместе с запросом (день 31).
+	RAGRerankQuestion bool
 
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
@@ -471,38 +476,40 @@ func splitList(v string) []string {
 // AgentConfig — снимок панели в виде конфига агента.
 func (s *Settings) AgentConfig() agent.Config {
 	return agent.Config{
-		Model:          s.Model,
-		System:         s.System,
-		Strategy:       s.Strategy,
-		Stream:         s.Stream,
-		Temperature:    s.Temperature,
-		TopP:           s.TopP,
-		Thinking:       s.Thinking,
-		Seed:           s.Seed,
-		MaxTokens:      s.MaxTokens,
-		Stop:           s.Stop,
-		ResponseFormat: s.ResponseFormat,
-		ContextLimit:   s.ContextLimit,
-		Context:        s.Context,
-		KeepLast:       s.KeepLast,
-		SummarizeEvery: s.SummarizeEvery,
-		Profile:        s.Profile,
-		TaskState:      s.TaskState,
-		TaskMap:        s.TaskMap,
-		Invariants:     s.Invariants,
-		InvariantSet:   s.InvariantSet,
-		Memory:         s.Memory,
-		User:           s.User,
-		Task:           s.Task,
-		MCP:            s.MCP,
-		RAG:            s.RAG,
-		RAGTopK:        s.RAGTopK,
-		RAGCandidates:  s.RAGCandidates,
-		RAGRerank:      s.RAGRerank,
-		RAGMinRerank:   s.RAGMinRerank,
-		RAGRewrite:     s.RAGRewrite,
-		RAGCite:        s.RAGCite,
-		RAGExpand:      s.RAGExpand,
+		Model:             s.Model,
+		System:            s.System,
+		Strategy:          s.Strategy,
+		Stream:            s.Stream,
+		Temperature:       s.Temperature,
+		TopP:              s.TopP,
+		Thinking:          s.Thinking,
+		Seed:              s.Seed,
+		MaxTokens:         s.MaxTokens,
+		Stop:              s.Stop,
+		ResponseFormat:    s.ResponseFormat,
+		ContextLimit:      s.ContextLimit,
+		Context:           s.Context,
+		KeepLast:          s.KeepLast,
+		SummarizeEvery:    s.SummarizeEvery,
+		Profile:           s.Profile,
+		TaskState:         s.TaskState,
+		TaskMap:           s.TaskMap,
+		Invariants:        s.Invariants,
+		InvariantSet:      s.InvariantSet,
+		Memory:            s.Memory,
+		User:              s.User,
+		Task:              s.Task,
+		MCP:               s.MCP,
+		RAG:               s.RAG,
+		RAGTopK:           s.RAGTopK,
+		RAGCandidates:     s.RAGCandidates,
+		RAGRerank:         s.RAGRerank,
+		RAGMinRerank:      s.RAGMinRerank,
+		RAGRewrite:        s.RAGRewrite,
+		RAGCite:           s.RAGCite,
+		RAGExpand:         s.RAGExpand,
+		RAGOpen:           s.RAGOpen,
+		RAGRerankQuestion: s.RAGRerankQuestion,
 	}.Clone()
 }
 
@@ -542,6 +549,8 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.RAGRewrite = c.RAGRewrite
 	s.RAGCite = c.RAGCite
 	s.RAGExpand = c.RAGExpand
+	s.RAGOpen = c.RAGOpen
+	s.RAGRerankQuestion = c.RAGRerankQuestion
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

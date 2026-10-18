@@ -70,6 +70,11 @@ type Options struct {
 	// Notice — строка в начало ленты: например, что часть разговоров
 	// не удалось прочитать.
 	Notice string
+
+	// Help — команда /help ассистента разработчика (день 31): вопрос
+	// о проекте с базой знаний и состоянием git. nil — /help уходит
+	// в разговор обычной репликой.
+	Help *Help
 }
 
 type focusTarget int
@@ -137,6 +142,9 @@ type Model struct {
 	// lastQuestion — последний заданный вопрос; по Ctrl+E он уходит
 	// на все модели сразу (задание дня 5).
 	lastQuestion string
+	// turnSystem — добавка к системному промпту на один ход: состояние
+	// репозитория для /help (день 31). send забирает её и обнуляет.
+	turnSystem string
 }
 
 func NewModel(o Options) *Model {
@@ -406,6 +414,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.follow = true
 		// Команды памяти (день 11) в модель не уходят: это правка памяти
 		// агента, а не реплика разговора.
+		// /help ассистента разработчика (день 31) — вопрос о проекте.
+		if cmd, ok := m.helpCommand(text); ok {
+			return m, cmd
+		}
 		if m.memoryCommand(text) {
 			return m, nil
 		}
@@ -669,6 +681,10 @@ func (m *Model) send(text string) tea.Cmd {
 	// Панель живёт в главном цикле и может поменяться, пока агент отвечает,
 	// поэтому конфиг отдаём агенту до старта, а подпись снимаем здесь же.
 	cfg := m.set.AgentConfig()
+	if m.turnSystem != "" {
+		cfg.System = strings.TrimSpace(cfg.System + "\n\n" + m.turnSystem)
+		m.turnSystem = ""
+	}
 	m.ag.SetConfig(cfg)
 	ag := m.ag
 	m.lastQuestion = text
@@ -874,6 +890,7 @@ func (m *Model) layout() {
 	}
 	m.ta.SetWidth(m.w - 4)
 	m.notes.SetSize(m.w-4, notesHeight)
+	m.panel.SetHeight(vpH)
 	m.refreshPanelWidth()
 }
 
@@ -939,6 +956,9 @@ func (m *Model) View() tea.View {
 		case focusMemory:
 			side = m.memoryView(pw - 2)
 		}
+		// Боковая колонка не выше ленты: иначе она вытягивает экран вниз,
+		// и блокнот с полем ввода уезжают за край окна (день 31).
+		side = clipHeight(side, m.vp.Height())
 		panel := m.frame(m.focus != focusInput && m.focus != focusNotes).Width(pw).Render(side)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, transcript, panel)
 	}
@@ -1072,4 +1092,15 @@ func stageMoves(tk *task.Task) string {
 		line += fmt.Sprintf(" · отказов: %d", n)
 	}
 	return line
+}
+
+// clipHeight — не больше h строк и без пустой строки в конце: она тоже
+// занимает строку экрана. Обрезанное помечается последней строкой.
+func clipHeight(s string, h int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if h <= 0 || len(lines) <= h {
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines[:h-1], stDim.Render(fmt.Sprintf("  … ещё %d строк", len(lines)-h+1)))
+	return strings.Join(lines, "\n")
 }

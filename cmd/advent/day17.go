@@ -19,6 +19,7 @@ import (
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/servers/budget"
+	"github.com/safronov-a1exander/advent/internal/servers/gitrepo"
 	"github.com/safronov-a1exander/advent/internal/servers/goals"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
 )
@@ -36,6 +37,7 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 	reportsDir := fs.String("reports", "reports/budget", "budget: куда save_report кладёт отчёты")
 	goalsData := fs.String("goals", "runs/mcp/goals.json", "goals: файл целей (день 20)")
 	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
+	repoRoot := fs.String("repo", ".", "git: каталог репозитория (день 31)")
 	// Имя сервера — первый аргумент, флаги можно писать и после него.
 	name := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -77,8 +79,10 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 			return err
 		}
 		srv = g
+	case "git":
+		srv = gitrepo.New(*repoRoot)
 	default:
-		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals", name)
+		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals, git", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.

@@ -179,3 +179,162 @@ func TestRewriteNoneSkipsSearchAndNamesConversationAsSource(t *testing.T) {
 		t.Fatal("без поиска нечего цитировать — режим цитат не включается")
 	}
 }
+
+// lastLLM запоминает последний запрос и отвечает текстом.
+type lastLLM struct{ last llm.Request }
+
+func (l *lastLLM) Name() string                                 { return "last" }
+func (l *lastLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (l *lastLLM) ChatStream(ctx context.Context, r llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return l.Chat(ctx, r)
+}
+func (l *lastLLM) Chat(_ context.Context, r llm.Request) (*llm.Response, error) {
+	l.last = r
+	return &llm.Response{Content: "На ветке изменены три файла."}, nil
+}
+
+func TestRAGOpenAsksModelWithoutDocsAndSaysSo(t *testing.T) {
+	llmc := &lastLLM{}
+	p := NewPool(llmc, "last", nil)
+	p.SetKnowledge(emptyKB{})
+	a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGCite: true, RAGOpen: true, RAGRerank: true, RAGMinRerank: llm.F(0.1)})
+	reply, err := a.Ask(context.Background(), "что изменилось на ветке?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Citation != nil {
+		t.Fatal("без фрагментов режим цитат не включается")
+	}
+	if llmc.last.ResponseFormat != nil {
+		t.Fatal("без цитат ответ — обычный текст, а не JSON")
+	}
+	q := llmc.last.Messages[len(llmc.last.Messages)-1].Content
+	if !strings.HasPrefix(q, NoDocsNote) || !strings.HasSuffix(q, "что изменилось на ветке?") {
+		t.Fatalf("модель должна знать, что документации нет: %q", q)
+	}
+	if !strings.HasSuffix(reply.Final.Content, NoDocsSource) {
+		t.Fatalf("источник ответа — не документация, и это надо сказать: %q", reply.Final.Content)
+	}
+	if h := a.History(); h[0].Content != "что изменилось на ветке?" {
+		t.Fatalf("в историю — голый вопрос: %q", h[0].Content)
+	}
+}
+
+func TestRenderShowsFewVerbatimQuotesButAllBroken(t *testing.T) {
+	c := &Citation{Known: true, Answer: "ответ"}
+	for i := 0; i < 7; i++ {
+		c.Quotes = append(c.Quotes, Quote{ID: "a#0", Text: "дословно", Verbatim: true})
+	}
+	c.Quotes = append(c.Quotes, Quote{ID: "a#1", Text: "выдумано"})
+	got := c.Render(nil)
+	if n := strings.Count(got, "«дословно»"); n != MaxShownQuotes {
+		t.Fatalf("дословных показано %d, ждали %d:\n%s", n, MaxShownQuotes, got)
+	}
+	if !strings.Contains(got, "«выдумано» ✗") || !strings.Contains(got, "ещё 3 — тоже дословно") {
+		t.Fatalf("непроверенная цитата и счёт скрытых должны быть видны:\n%s", got)
+	}
+}
+
+// toolsRouteLLM: rewrite с инструментами отвечает TOOLS, ответ — текстом.
+type toolsRouteLLM struct{ sawTools bool }
+
+func (r *toolsRouteLLM) Name() string                                 { return "tr" }
+func (r *toolsRouteLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (r *toolsRouteLLM) ChatStream(ctx context.Context, q llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return r.Chat(ctx, q)
+}
+func (r *toolsRouteLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
+	if strings.Contains(q.Messages[0].Content, "Ты переписываешь вопрос") {
+		r.sawTools = strings.Contains(q.Messages[0].Content, "rates.convert")
+		return &llm.Response{Content: "TOOLS"}, nil
+	}
+	return &llm.Response{Content: "Сейчас 840 рублей."}, nil
+}
+
+func TestRewriteRoutesStateQuestionsToTools(t *testing.T) {
+	m := &toolsRouteLLM{}
+	kb := &countKB{}
+	p := NewPool(m, "tr", nil)
+	p.SetKnowledge(kb)
+	p.SetToolbox(&fakeBox{})
+	a := p.SpawnTemp(Config{Model: "m", MCP: []string{"rates"}, RAG: "on", RAGRewrite: true, RAGCite: true})
+	reply, err := a.Ask(context.Background(), "сколько сейчас 10 долларов?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.sawTools {
+		t.Fatal("rewrite должен знать, какие инструменты есть")
+	}
+	if n := kb.calls.Load(); n != 0 {
+		t.Fatalf("при TOOLS в базе не ищут, а поисков %d", n)
+	}
+	if !strings.HasSuffix(reply.Final.Content, ToolsSource) {
+		t.Fatalf("источник — инструменты: %q", reply.Final.Content)
+	}
+}
+
+func TestRewriteWithoutToolsHasNoToolsRoute(t *testing.T) {
+	m := &toolsRouteLLM{}
+	kb := &countKB{}
+	p := NewPool(m, "tr", nil)
+	p.SetKnowledge(kb)
+	a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGRewrite: true})
+	if _, err := a.Ask(context.Background(), "сколько сейчас 10 долларов?", nil); err != nil {
+		t.Fatal(err)
+	}
+	if kb.calls.Load() != 1 {
+		t.Fatal("без инструментов TOOLS — просто строка запроса, поиск идёт как раньше")
+	}
+}
+
+func TestQuoteAcrossListItemsIsVerbatim(t *testing.T) {
+	src := "- **internal/llm** — клиент, учёт токенов и стоимости.\n- **internal/config** — `config.yaml` и переменные окружения."
+	q := "**internal/llm** — клиент, учёт токенов и стоимости. **internal/config** — `config.yaml` и переменные окружения."
+	if !strings.Contains(squashQuote(src), squashQuote(q)) {
+		t.Fatalf("склеенные пункты списка — дословная цитата:\n%q\n%q", squashQuote(src), squashQuote(q))
+	}
+	if strings.Contains(squashQuote("стоимость - 5 рублей"), squashQuote("стоимость 5 рублей")) {
+		t.Fatal("тире внутри строки — не маркер списка")
+	}
+}
+
+type optsKB struct{ got rag.Options }
+
+func (k *optsKB) Retrieve(_ context.Context, q string, o rag.Options) (*rag.Result, error) {
+	k.got = o
+	return &rag.Result{Query: q}, nil
+}
+
+// rewriteLLM переписывает вопрос в ключевые слова.
+type rewriteLLM struct{}
+
+func (rewriteLLM) Name() string                                 { return "rw" }
+func (rewriteLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (r rewriteLLM) ChatStream(ctx context.Context, q llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return r.Chat(ctx, q)
+}
+func (rewriteLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
+	if strings.Contains(q.Messages[0].Content, "Ты переписываешь вопрос") {
+		return &llm.Response{Content: "структура проекта каталоги"}, nil
+	}
+	return &llm.Response{Content: "ответ"}, nil
+}
+
+func TestRerankQuestionKeepsOriginalForCrossEncoder(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		kb := &optsKB{}
+		p := NewPool(rewriteLLM{}, "rw", nil)
+		p.SetKnowledge(kb)
+		a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGRewrite: true, RAGRerank: true, RAGRerankQuestion: on})
+		if _, err := a.Ask(context.Background(), "Как устроен проект?", nil); err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if on {
+			want = "Как устроен проект? (структура проекта каталоги)"
+		}
+		if kb.got.RerankQuery != want {
+			t.Fatalf("rag_rerank_question=%v: реранк по %q, ждали %q", on, kb.got.RerankQuery, want)
+		}
+	}
+}

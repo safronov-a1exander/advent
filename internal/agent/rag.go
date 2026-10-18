@@ -64,44 +64,82 @@ func (p *Pool) SetKnowledge(k Knowledge) {
 // С rag_rewrite искать идут не по вопросу, а по его переписанной форме
 // (день 23): служебный вызов модели раскрывает отсылки к прошлым репликам
 // и называет термины, которыми это могло быть записано в документах.
-func (a *Agent) retrieve(ctx context.Context, cfg Config, mem *memory.Memory, hist []llm.Message, text string, turn *Turn, on func(Event)) (res *rag.Result, skipped bool) {
+//
+// funcs — инструменты этого хода (день 31): если они есть, rewrite
+// работает и роутером — вопрос о текущем состоянии, которое знают
+// инструменты, в документации не ищется.
+func (a *Agent) retrieve(ctx context.Context, cfg Config, mem *memory.Memory, hist []llm.Message, text string, funcs []llm.Tool, turn *Turn, on func(Event)) (res *rag.Result, skip Skip) {
 	if cfg.RAG == "" {
-		return nil, false
+		return nil, ""
 	}
 	a.mu.Lock()
 	kb := a.knowledge
 	a.mu.Unlock()
 	if kb == nil {
 		on(Event{Kind: EventRetrieval, Label: "база знаний не подключена", Failed: true})
-		return nil, false
+		return nil, ""
 	}
 	query := text
 	if cfg.RAGRewrite {
-		query = a.rewriteQuery(ctx, cfg, taskMemo(mem), hist, text, turn, on)
+		query = a.rewriteQuery(ctx, cfg, taskMemo(mem), hist, text, funcs, turn, on)
 		// День 25: вопрос о самом разговоре — «напомни цель», «что мы
 		// решили», «спасибо». В базе его ответа нет и быть не может,
 		// а «не знаю» дня 24 на него было бы неправдой: ответ — в памяти.
 		if query == NoSearch {
 			on(Event{Kind: EventRetrieval, Label: "поиск не нужен: вопрос о самом разговоре — отвечаю по памяти и истории"})
-			return nil, true
+			return nil, SkipConversation
+		}
+		// День 31: вопрос о том, что знают инструменты, а не документы.
+		if len(funcs) > 0 && query == ToolsRoute {
+			on(Event{Kind: EventRetrieval, Label: "поиск не нужен: вопрос о текущем состоянии — отвечают инструменты"})
+			return nil, SkipTools
 		}
 	}
-	res, err := kb.Retrieve(ctx, query, cfg.ragOptions())
+	o := cfg.ragOptions()
+	if cfg.RAGRerankQuestion && query != text {
+		o.RerankQuery = text + " (" + query + ")"
+	}
+	res, err := kb.Retrieve(ctx, query, o)
 	if err != nil {
 		on(Event{Kind: EventRetrieval, Label: "база знаний недоступна", Content: err.Error(), Failed: true})
-		return nil, false
+		return nil, ""
 	}
 	on(Event{Kind: EventRetrieval, Label: retrievalLabel(cfg, res), Content: HitTrace(res.Kept)})
-	return res, false
+	return res, ""
 }
 
 // NoSearch — ответ rewrite, когда искать в базе нечего (день 25).
 const NoSearch = "NONE"
 
+// ToolsRoute — ответ rewrite, когда на вопрос отвечают инструменты, а не
+// документы (день 31): «что изменилось на ветке» — это git, а не заметка,
+// в которой однажды описали, что на ветке менялось.
+const ToolsRoute = "TOOLS"
+
+// Skip — почему в базе не искали.
+type Skip string
+
+const (
+	SkipConversation Skip = "conversation" // вопрос о самом разговоре (день 25)
+	SkipTools        Skip = "tools"        // вопрос о том, что знают инструменты (день 31)
+)
+
+// ToolsSource — подпись источника, когда в документации не искали,
+// потому что спрашивали о текущем состоянии (день 31).
+const ToolsSource = "Источник: инструменты — вопрос о текущем состоянии, в документации не искали."
+
 // ConversationSource — подпись источника у ответа, для которого в базе
 // не искали: «всегда выводить источники» значит и здесь сказать, откуда
 // ответ (день 25).
 const ConversationSource = "Источник: разговор и память задачи — в базе знаний не искали."
+
+// NoDocsNote и NoDocsSource — ход с RAGOpen, когда в документации ничего
+// не нашлось (день 31): модель знает, что фрагментов нет, и ответ
+// подписан тем, откуда он на самом деле.
+const (
+	NoDocsNote   = "В документации проекта по этому вопросу ничего не нашлось. Отвечай по данным инструментов — вызови их, если нужно. Если данных инструментов не хватает, так и скажи, не придумывай."
+	NoDocsSource = "Источник: в документации не нашлось — ответ по инструментам и разговору."
+)
 
 // taskMemo — рабочий слой памяти строками «ключ: значение»: с ним rewrite
 // раскрывает «а сколько это стоит?» через цель задачи, а не только через
@@ -260,6 +298,34 @@ const rewriteSystem = `Ты переписываешь вопрос пользо
 // RewriteQuery — служебный вызов: вопрос → поисковый запрос. Общий для
 // агента и для команды сравнения режимов поиска.
 func RewriteQuery(ctx context.Context, client llm.Provider, model, memo string, hist []llm.Message, text string) (string, llm.Request, *llm.Response, error) {
+	return rewriteWithTools(ctx, client, model, memo, hist, text, nil)
+}
+
+// rewriteToolsRoute — роутер перед rewrite, когда у хода есть инструменты
+// (день 31). Только тогда: агентам без инструментов маршрут TOOLS не
+// нужен, и замеры дней 23–25 остаются как были.
+//
+// Первая версия была ещё одним пунктом в конце списка правил rewrite,
+// и модель его пропускала: «что сделано на этой ветке?» переписывалось
+// в запрос к базе. Решение о маршруте стоит первым и с примерами.
+const rewriteToolsRoute = `Сначала реши, куда идёт вопрос.
+У ассистента есть инструменты — они показывают текущее состояние:
+%s
+Если ответ на вопрос — это текущее состояние, которое показывают инструменты (что сейчас, что изменилось, какие файлы есть или изменены, какая ветка, последние коммиты), верни ровно TOOLS и больше ничего.
+Если вопрос о том, как что устроено, зачем сделано, что написано в документации, — переписывай его в запрос к базе по правилам ниже.
+Примеры: «что сделано на этой ветке?» → TOOLS; «какие файлы я поменял?» → TOOLS; «на какой мы ветке?» → TOOLS; «как устроен поиск по базе?» → запрос к базе; «зачем флаг -handoff?» → запрос к базе.
+
+`
+
+func rewriteWithTools(ctx context.Context, client llm.Provider, model, memo string, hist []llm.Message, text string, funcs []llm.Tool) (string, llm.Request, *llm.Response, error) {
+	system := rewriteSystem
+	if len(funcs) > 0 {
+		var t strings.Builder
+		for _, f := range funcs {
+			fmt.Fprintf(&t, "- %s: %s\n", displayName(f.Function.Name), clipRunes(f.Function.Description, 160))
+		}
+		system = fmt.Sprintf(rewriteToolsRoute, strings.TrimRight(t.String(), "\n")) + rewriteSystem
+	}
 	var b strings.Builder
 	if memo != "" {
 		b.WriteString("Память задачи:\n" + memo + "\n\n")
@@ -279,7 +345,7 @@ func RewriteQuery(ctx context.Context, client llm.Provider, model, memo string, 
 	req := llm.Request{
 		Model: model,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: rewriteSystem},
+			{Role: llm.RoleSystem, Content: system},
 			{Role: llm.RoleUser, Content: b.String()},
 		},
 		Temperature: llm.F(0),
@@ -297,13 +363,16 @@ func RewriteQuery(ctx context.Context, client llm.Provider, model, memo string, 
 	if strings.EqualFold(q, NoSearch) {
 		q = NoSearch
 	}
+	if len(funcs) > 0 && strings.EqualFold(q, ToolsRoute) {
+		q = ToolsRoute
+	}
 	return q, req, resp, nil
 }
 
 // rewriteQuery — то же внутри хода: в журнал, в учёт и в ленту. Сбой
 // не ломает ход — ищем по самому вопросу.
-func (a *Agent) rewriteQuery(ctx context.Context, cfg Config, memo string, hist []llm.Message, text string, turn *Turn, on func(Event)) string {
-	q, req, resp, err := RewriteQuery(ctx, a.client, cfg.Model, memo, hist, text)
+func (a *Agent) rewriteQuery(ctx context.Context, cfg Config, memo string, hist []llm.Message, text string, funcs []llm.Tool, turn *Turn, on func(Event)) string {
+	q, req, resp, err := rewriteWithTools(ctx, a.client, cfg.Model, memo, hist, text, funcs)
 	a.record(req, resp, err, "переписать запрос", true)
 	a.accountAux(resp, err)
 	if err != nil {

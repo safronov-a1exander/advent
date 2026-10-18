@@ -158,3 +158,37 @@ func TestExpandJoinsSectionParts(t *testing.T) {
 		t.Fatal("fixed не расширяется")
 	}
 }
+
+// queryReranker запоминает, с чем его спросили.
+type queryReranker struct{ got *string }
+
+func (q queryReranker) Name() string { return "q" }
+func (q queryReranker) Rerank(_ context.Context, query string, docs []string) ([]float32, error) {
+	*q.got = query
+	return make([]float32, len(docs)), nil
+}
+
+// Кандидаты ищутся по запросу, реранкер спрашивают RerankQuery, а в
+// результате остаётся поисковый запрос (день 31).
+func TestSearchRerankQuery(t *testing.T) {
+	d := newDocument("a.md", "# A\n\n## Раздел\n\nструктура проекта и каталоги\n")
+	emb := wordEmbedder{vocab: []string{"структура", "каталоги"}}
+	ix, err := Build(context.Background(), []Document{d}, Structure, Chunking{Max: 400, Min: 1}, emb, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rq := range []string{"", "Как устроен проект? (структура каталоги)"} {
+		var got string
+		res, err := Search(context.Background(), ix, emb, queryReranker{&got}, "структура каталоги", Options{TopK: 1, Rerank: true, RerankQuery: rq})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := rq
+		if want == "" {
+			want = "структура каталоги"
+		}
+		if got != want || res.Query != "структура каталоги" {
+			t.Fatalf("RerankQuery=%q: реранк по %q, Query=%q", rq, got, res.Query)
+		}
+	}
+}

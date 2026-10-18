@@ -243,6 +243,13 @@ type Panel struct {
 	// Changed взводится при любом изменении значения — экран может
 	// показать, что настройки разошлись с последним прогоном.
 	Changed bool
+	// height — сколько строк панели помещается рядом с лентой; 0 — без
+	// ограничения. top — первое видимое поле, когда все не влезают.
+	//
+	// Каждый день добавлял в панель строку-другую, и к тридцать первому
+	// полей стало больше, чем строк в окне: панель вытягивала экран вниз,
+	// блокнот и поле ввода уезжали за край.
+	height, top int
 }
 
 func NewPanel(fields []Field, width int) *Panel {
@@ -254,6 +261,7 @@ func NewPanel(fields []Field, width int) *Panel {
 
 func (p *Panel) SetFields(f []Field) { p.fields = f }
 func (p *Panel) SetWidth(w int)      { p.width = w; p.input.SetWidth(w - 6) }
+func (p *Panel) SetHeight(h int)     { p.height = h }
 func (p *Panel) Editing() bool       { return p.editing }
 func (p *Panel) Selected() string {
 	if p.sel < len(p.fields) {
@@ -355,7 +363,40 @@ func (p *Panel) View(focused bool) string {
 	if valW < 8 {
 		valW = 8
 	}
-	for i, f := range p.fields {
+
+	// Хвост — подсказка, ввод, ошибка — собирается заранее: под поля
+	// остаётся то, что от него не занято.
+	var tail strings.Builder
+	if p.sel < len(p.fields) {
+		if h := p.fields[p.sel].Hint; h != "" && focused {
+			tail.WriteString("\n" + stDim.Render(wrap(h, p.width)) + "\n")
+		}
+	}
+	if p.editing {
+		tail.WriteString("\n" + p.input.View() + "\n")
+		tail.WriteString(stDim.Render("Enter — применить, Esc — отмена") + "\n")
+	}
+	if p.err != "" {
+		tail.WriteString("\n" + stErr.Render(short(p.err, p.width)) + "\n")
+	}
+
+	from, to := 0, len(p.fields)
+	if p.height > 0 {
+		room := p.height - 2 - strings.Count(tail.String(), "\n")
+		if room < 3 {
+			room = 3
+		}
+		if len(p.fields) > room {
+			from, to = p.window(room - 2) // строка «↑ ещё» и строка «↓ ещё»
+		}
+	}
+	if from > 0 {
+		b.WriteString(stDim.Render(fmt.Sprintf("  ↑ ещё %d", from)) + "\n")
+	} else if to < len(p.fields) {
+		b.WriteString("\n")
+	}
+	for i := from; i < to; i++ {
+		f := p.fields[i]
 		cur := i == p.sel && focused
 		marker := "  "
 		if cur {
@@ -374,20 +415,34 @@ func (p *Panel) View(focused bool) string {
 		}
 		b.WriteString(st.Render(line) + "\n")
 	}
-
-	if p.sel < len(p.fields) {
-		if h := p.fields[p.sel].Hint; h != "" && focused {
-			b.WriteString("\n" + stDim.Render(wrap(h, p.width)) + "\n")
-		}
+	if to < len(p.fields) {
+		b.WriteString(stDim.Render(fmt.Sprintf("  ↓ ещё %d", len(p.fields)-to)) + "\n")
+	} else if from > 0 {
+		b.WriteString("\n")
 	}
-	if p.editing {
-		b.WriteString("\n" + p.input.View() + "\n")
-		b.WriteString(stDim.Render("Enter — применить, Esc — отмена") + "\n")
-	}
-	if p.err != "" {
-		b.WriteString("\n" + stErr.Render(short(p.err, p.width)) + "\n")
-	}
+	b.WriteString(tail.String())
 	return b.String()
+}
+
+// window — какие n полей показать: выбранное всегда видно, окно сдвигается
+// только когда выбор выходит за его край — список не прыгает на каждое ↑↓.
+func (p *Panel) window(n int) (from, to int) {
+	if n < 1 {
+		n = 1
+	}
+	if p.sel < p.top {
+		p.top = p.sel
+	}
+	if p.sel >= p.top+n {
+		p.top = p.sel - n + 1
+	}
+	if last := len(p.fields) - n; p.top > last {
+		p.top = last
+	}
+	if p.top < 0 {
+		p.top = 0
+	}
+	return p.top, p.top + n
 }
 
 // ---- мелочи ----
