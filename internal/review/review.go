@@ -256,10 +256,17 @@ func (p *Pipeline) ask(ctx context.Context, m Model, prompt string, res *Result)
 			at.Latency, at.Prompt, at.Output, at.CostUSD = resp.Latency, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.CostUSD
 		}
 		if err != nil {
-			at.Error = err.Error()
+			at.Error = errText(err)
 			res.Attempts = append(res.Attempts, at)
-			lastErr = err
-			p.logf("попытка %d · %s: ошибка API: %v", i+1, m.ID, err)
+			lastErr = errors.New(at.Error)
+			p.logf("попытка %d · %s: ошибка API: %s", i+1, m.ID, at.Error)
+			// 400, 401, 404 повтором не лечатся: неверная модель или ключ
+			// останутся такими же через две секунды. Повторять имеет смысл
+			// сеть, 5xx и 429 — остальное сразу к запасной модели.
+			if !retryable(err) {
+				p.logf("ошибка не временная — повторять бессмысленно")
+				break
+			}
 			continue
 		}
 		ans, perr := ParseAnswer(resp.Content)
@@ -280,6 +287,38 @@ func (p *Pipeline) ask(ctx context.Context, m Model, prompt string, res *Result)
 		return ans, nil
 	}
 	return nil, lastErr
+}
+
+// retryable — поможет ли повтор. На записи дня 32 обе попытки ушли
+// на модель, которой нет: 400 вернулся дважды, а лог показал это сырым
+// JSON на три строки.
+func retryable(err error) bool {
+	var ae *llm.APIError
+	if errors.As(err, &ae) {
+		return ae.Status == 429 || ae.Status >= 500
+	}
+	return true // сеть, таймаут — повтор может помочь
+}
+
+// errText — ошибка API одной строкой: message из тела, без JSON вокруг.
+func errText(err error) string {
+	var ae *llm.APIError
+	if !errors.As(err, &ae) {
+		return err.Error()
+	}
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(ae.Body), &body) == nil && body.Error.Message != "" {
+		msg := body.Error.Message
+		if i := strings.Index(msg, " (request_id"); i > 0 {
+			msg = msg[:i]
+		}
+		return fmt.Sprintf("%d %s", ae.Status, msg)
+	}
+	return err.Error()
 }
 
 // ParseAnswer разбирает JSON модели и проверяет обязательное.

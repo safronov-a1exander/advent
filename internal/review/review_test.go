@@ -129,6 +129,26 @@ func TestRetryRepairAndValidation(t *testing.T) {
 	}
 }
 
+func TestBadRequestGoesStraightToFallback(t *testing.T) {
+	bad := &llm.APIError{Status: 400, Body: `{"error":{"message":"no such model (request_id: x)"}}`}
+	primary := &fakeChat{errs: []error{bad, bad}}
+	backup := &fakeChat{out: []string{goodAnswer}}
+	p := &Pipeline{Primary: Model{Client: primary, ID: "broken"}, Fallback: Model{Client: backup, ID: "pro"}, Tries: 2}
+	res, _ := p.Run(context.Background(), Input{Diff: sampleDiff})
+	if primary.calls != 1 || !res.Fallback {
+		t.Fatalf("400 не повторяется: вызовов основной %d", primary.calls)
+	}
+	if res.Attempts[0].Error != "400 no such model" {
+		t.Fatalf("в попытке — текст ошибки, а не JSON: %q", res.Attempts[0].Error)
+	}
+	busy := &llm.APIError{Status: 503, Body: "busy"}
+	primary = &fakeChat{errs: []error{busy}, out: []string{"", goodAnswer}}
+	p = &Pipeline{Primary: Model{Client: primary, ID: "flash"}, Tries: 2}
+	if res, _ := p.Run(context.Background(), Input{Diff: sampleDiff}); res.Failed || primary.calls != 2 {
+		t.Fatalf("503 — временная, повтор нужен: вызовов %d", primary.calls)
+	}
+}
+
 func TestFallbackModelThenHumanWhenAllFail(t *testing.T) {
 	primary := &fakeChat{errs: []error{errors.New("400"), errors.New("400")}}
 	backup := &fakeChat{out: []string{goodAnswer}}
