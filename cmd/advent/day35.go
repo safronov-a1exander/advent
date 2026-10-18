@@ -463,15 +463,18 @@ func shipActions(ctx context.Context, repo *gitrepo.Repo, cfg *config.Config, d 
 	if desc == nil {
 		return acts, "", errors.New("PR нужен, но описание не готово — субагент «автор PR» не справился")
 	}
-	// PR в main, если предыдущий день туда уже влит; иначе — стеком
-	// в ветку предыдущего дня, чтобы в diff был только этот шаг.
-	// Без сети молча выбрать base нельзя: PR открылся бы не туда.
-	if _, err := repo.Git(ctx, "fetch", "--quiet", "origin", "main"); err != nil {
-		return nil, "", fmt.Errorf("не узнать, влит ли %s в main: %w", d.Prev, err)
-	}
+	// PR всегда в main — как у всех дней до этой недели. Первая версия
+	// открывала его стеком в ветку предыдущего дня, если тот ещё не влит:
+	// так выглядело «в diff только этот шаг». Но PR мёржатся merge-коммитом,
+	// и PR в main сам сужается до своего шага, как только смёржен
+	// предыдущий; а стек потом пришлось переводить на main руками.
+	// Предыдущий не влит — это не повод менять base, а повод сказать.
 	base := "main"
+	if _, err := repo.Git(ctx, "fetch", "--quiet", "origin", "main"); err != nil {
+		logLine("⚠ не удалось обновить origin/main: %v", err)
+	}
 	if _, err := repo.Git(ctx, "merge-base", "--is-ancestor", d.Prev, "origin/main"); err != nil {
-		base = d.Prev
+		logLine("⚠ %s ещё не влит в main — пока его PR не смёржен, в diff этого PR будут и его коммиты", d.Prev)
 	}
 	bodyPath := filepath.Join(cfg.ReportsDir, "ship", fmt.Sprintf("day%02d-pr.md", d.N))
 	if err := os.MkdirAll(filepath.Dir(bodyPath), 0o755); err != nil {
