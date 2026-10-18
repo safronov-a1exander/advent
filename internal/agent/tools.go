@@ -39,6 +39,14 @@ type Toolbox interface {
 // на последнем круге функции у неё забираются, и она обязана ответить.
 const MaxToolRounds = 8
 
+// toolRounds — лимит кругов этого агента: свой из конфига или общий.
+func (c Config) toolRounds() int {
+	if c.MaxToolRounds > 0 {
+		return c.MaxToolRounds
+	}
+	return MaxToolRounds
+}
+
 // SetToolbox подключает MCP-серверы. Какие из них выданы агенту, решает
 // его конфиг.
 func (p *Pool) SetToolbox(tb Toolbox) {
@@ -87,7 +95,7 @@ func (a *Agent) toolLoop(ctx context.Context, cfg Config, req llm.Request, funcs
 	for round := 0; ; round++ {
 		req.Messages = msgs
 		req.Tools = funcs
-		last := round >= MaxToolRounds
+		last := round >= cfg.toolRounds()
 		if last {
 			req.Tools = nil
 			req.Messages = append(msgs, llm.Message{Role: llm.RoleUser,

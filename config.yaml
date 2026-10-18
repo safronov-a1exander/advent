@@ -230,6 +230,12 @@ mcp_servers:
     command: "@self"
     args: [mcp-server, crm]
     description: CRM поддержки — обращения, ключи и запросы их авторов
+  # Файлы проекта (день 34): список, чтение, поиск, правки. Правки — только
+  # в черновик runs/files/stage; в проект их переносит `advent files -apply`.
+  - name: files
+    command: "@self"
+    args: [mcp-server, files]
+    description: файлы проекта — поиск, чтение, правки в черновик
   # Тот же сервер курсов, но отдельным процессом по HTTP (день 18): ему нужно
   # жить и делать замеры, когда к нему никто не подключён. Запуск:
   #   advent mcp-server rates -http 127.0.0.1:8765
