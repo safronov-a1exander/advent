@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -113,12 +114,19 @@ func (r *Repo) Git(ctx context.Context, args ...string) (string, error) {
 // ref проверяет имя ветки или коммита из аргументов модели. Строка
 // с «-» в начале стала бы флагом git — так через «base» можно было бы
 // передать, например, --output и записать файл.
+//
+// Остальной синтаксис ревизий git тоже не нужен: «a..b» — диапазон,
+// «x:путь» — содержимое файла, «~» и «^» — предки. Инструмент обещает
+// «ветку или коммит» и пропускает только их (замечание AI-ревью PR #32,
+// день 32).
+var refRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
 func ref(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(s, "-") || strings.ContainsAny(s, " \t\n") {
+	if !refRe.MatchString(s) || strings.Contains(s, "..") {
 		return "", fmt.Errorf("недопустимое имя ветки или коммита %q", s)
 	}
 	return s, nil
