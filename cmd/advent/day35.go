@@ -41,6 +41,7 @@ func cmdShip(ctx context.Context, args []string) error {
 	c := bindCommon(fs)
 	dayN := fs.Int("day", 0, "номер дня (по умолчанию — из имени текущей ветки day-NN)")
 	yes := fs.Bool("yes", false, "выполнить публикацию (push и PR) без вопроса — человек разрешил заранее")
+	dry := fs.Bool("dry", false, "только показать план публикации и не спрашивать — для записи и проверки")
 	skipTests := fs.Bool("skip-tests", false, "не гонять go test (для повторного прогона, когда тесты только что прошли)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране — для записи видео")
 	if err := fs.Parse(args); err != nil {
@@ -114,7 +115,7 @@ func cmdShip(ctx context.Context, args []string) error {
 		logLine("  %s", a)
 	}
 	ok := *yes
-	if !ok {
+	if !ok && !*dry {
 		ok = confirm("выполнить? [y/N] ")
 	}
 	if !ok {
