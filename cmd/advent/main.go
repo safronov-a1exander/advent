@@ -57,6 +57,7 @@ func usage() {
   review    AI-ревью PR или ветки: diff, RAG, проверки кодом, комментарий в PR (день 32)
   support   поддержка пользователей: FAQ в RAG, CRM по MCP, чат по обращению или страница (день 33)
   files     ассистент по файлам проекта: цель → поиск, чтение, правки в черновик → diff (день 34)
+  ship      сдача дня: проверки, субагенты (ревью, описание PR, README), push и PR с подтверждения (день 35)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -83,6 +84,8 @@ func run() error {
 		return cmdAsk(ctx, args)
 	case "dev":
 		return cmdDev(ctx, args)
+	case "ship":
+		return cmdShip(ctx, args)
 	case "files":
 		return cmdFiles(ctx, args)
 	case "support":
