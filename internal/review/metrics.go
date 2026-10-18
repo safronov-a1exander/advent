@@ -58,7 +58,10 @@ func AppendMetric(path string, m Metric) error {
 		return err
 	}
 	defer f.Close()
-	b, _ := json.Marshal(m)
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
 	_, err = f.Write(append(b, '\n'))
 	return err
 }

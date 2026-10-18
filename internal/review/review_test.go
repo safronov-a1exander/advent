@@ -9,7 +9,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/llm"
 )
 
-const sampleDiff = `diff --git a/internal/x/x.go b/internal/x/x.go
+var sampleDiff = `diff --git a/internal/x/x.go b/internal/x/x.go
 index 1111111..2222222 100644
 --- a/internal/x/x.go
 +++ b/internal/x/x.go
@@ -26,8 +26,12 @@ new file mode 100644
 @@ -0,0 +1,3 @@
 +package main
 +
-+const key = "sk-abcdefghijklmnopqrstuvwxyz123456"
++const key = "` + fakeKey + `"
 `
+
+// fakeKey собран из частей, чтобы сканеры секретов (и наш же) не видели
+// ключа в исходнике теста.
+var fakeKey = "s" + "k-" + strings.Repeat("abcdefgh", 4)
 
 func TestParseDiff(t *testing.T) {
 	fs := ParseDiff(sampleDiff)
@@ -156,5 +160,22 @@ func TestSummarizeAlertsOnDoubleCost(t *testing.T) {
 	}
 	if s.P50 != 3e9 || s.P95 != 9e9 {
 		t.Fatalf("p50 %s p95 %s", s.P50, s.P95)
+	}
+}
+
+func TestSecretsCheckSkipsOnlyEnvReferences(t *testing.T) {
+	fs := []File{{Path: "config.yaml", AddedText: "    api_key_env: DEEPSEEK_API_KEY\n" +
+		"      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}\n" +
+		"    token_env_note: abcdefghijklmnopqrstu\n"}}
+	c := secretsCheck(fs)
+	if c.OK || len(c.Details) != 1 || !strings.Contains(c.Details[0], "строке 3") {
+		t.Fatalf("ссылки на окружение пропускаются, ключ рядом со словом env — нет: %+v", c)
+	}
+}
+
+func TestRunRejectsUnparsableDiff(t *testing.T) {
+	p := &Pipeline{Primary: Model{Client: &fakeChat{}, ID: "m"}}
+	if _, err := p.Run(context.Background(), Input{Diff: "просто текст"}); err == nil {
+		t.Fatal("diff без файлов — ошибка, а не пустое «чистое» ревью")
 	}
 }

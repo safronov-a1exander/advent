@@ -40,6 +40,7 @@ func cmdReview(ctx context.Context, args []string) error {
 	kb := fs.String("kb", "review", "база знаний из rag.bases: правила ревью, документация и код")
 	tries := fs.Int("tries", 2, "попыток на модель")
 	stats := fs.Bool("stats", false, "только метрики по журналу прогонов")
+	maxReviews := fs.Int("max-reviews", 0, "с -watch: остановиться после стольких опубликованных ревью (0 — следить, пока не остановят)")
 	hold := fs.Duration("hold", 0, "подержать итог на экране — для записи видео")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -84,11 +85,15 @@ func cmdReview(ctx context.Context, args []string) error {
 	}
 	repo := &gitrepo.Repo{Root: c.dir, Timeout: 2 * time.Minute}
 	run := func(in review.Input) (*review.Result, error) {
-		p.Checks = review.DefaultChecks(func(ctx context.Context, path string) ([]byte, error) {
+		// Копия пайплайна на прогон: проверки читают файлы именно этой
+		// версии, и наблюдатель, ревьюя PR за PR, не должен подменять их
+		// в общем объекте (замечание собственного ревью, день 32).
+		pp := *p
+		pp.Checks = review.DefaultChecks(func(ctx context.Context, path string) ([]byte, error) {
 			out, err := repo.Git(ctx, "show", in.SHA+":"+path)
 			return []byte(out), err
 		})
-		res, err := p.Run(ctx, in)
+		res, err := pp.Run(ctx, in)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +122,7 @@ func cmdReview(ctx context.Context, args []string) error {
 
 	switch {
 	case *watch > 0:
-		return watchPRs(ctx, repo, *watch, run)
+		return watchPRs(ctx, repo, *watch, *maxReviews, run)
 	case *pr > 0:
 		in, err := prInput(ctx, repo, *pr)
 		if err != nil {
@@ -251,8 +256,13 @@ func publish(ctx context.Context, in review.Input, res *review.Result) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	f.WriteString(res.Markdown())
-	f.Close()
+	_, werr := f.WriteString(res.Markdown())
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return fmt.Errorf("комментарий не собрался: %w", werr)
+	}
 	out, err := gh(ctx, "pr", "comment", strconv.Itoa(in.PR), "--body-file", f.Name())
 	if err != nil {
 		return err
@@ -265,25 +275,32 @@ func publish(ctx context.Context, in review.Input, res *review.Result) error {
 // опрашиваются по расписанию, новая версия (новый SHA головы) — ревью
 // и комментарий. Уже отревьюенные версии узнаются по метке в комментариях,
 // поэтому перезапуск наблюдателя ничего не повторяет.
-func watchPRs(ctx context.Context, repo *gitrepo.Repo, every time.Duration, run func(review.Input) (*review.Result, error)) error {
+//
+// Версия считается сделанной только после публикации: если ревью или
+// комментарий упали, на следующем опросе она пробуется снова, а не
+// пропускается молча до перезапуска (замечание собственного ревью).
+func watchPRs(ctx context.Context, repo *gitrepo.Repo, every time.Duration, max int, run func(review.Input) (*review.Result, error)) error {
 	logLine("наблюдаю за открытыми PR каждые %s · Ctrl+C — стоп", every)
 	done := map[string]bool{}
+	published := 0
 	for {
 		raw, err := gh(ctx, "pr", "list", "--state", "open", "--json", "number,headRefOid,title")
 		if err != nil {
 			logLine("GitHub недоступен: %v — следующая попытка через %s", err, every)
 		} else {
 			var prs []ghPR
-			json.Unmarshal(raw, &prs)
+			if err := json.Unmarshal(raw, &prs); err != nil {
+				logLine("ответ gh pr list не разобрать: %v", err)
+			}
 			for _, p := range prs {
 				key := fmt.Sprintf("%d@%s", p.Number, p.SHA)
 				if done[key] {
 					continue
 				}
-				done[key] = true
 				com, err := gh(ctx, "pr", "view", strconv.Itoa(p.Number), "--json", "comments")
 				if err == nil && bytes.Contains(com, []byte(review.Marker(p.SHA))) {
-					continue // эту версию уже ревьюили
+					done[key] = true // эту версию уже ревьюили
+					continue
 				}
 				in, err := prInput(ctx, repo, p.Number)
 				if err != nil {
@@ -296,7 +313,14 @@ func watchPRs(ctx context.Context, repo *gitrepo.Repo, every time.Duration, run 
 					continue
 				}
 				if err := publish(ctx, in, res); err != nil {
-					logLine("PR #%d: комментарий не опубликован: %v", p.Number, err)
+					logLine("PR #%d: комментарий не опубликован: %v — попробую на следующем опросе", p.Number, err)
+					continue
+				}
+				done[key] = true
+				published++
+				if max > 0 && published >= max {
+					logLine("опубликовано ревью: %d — наблюдение закончено", published)
+					return nil
 				}
 			}
 		}

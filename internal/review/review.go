@@ -146,6 +146,12 @@ func (p *Pipeline) Run(ctx context.Context, in Input) (*Result, error) {
 	if len(in.Files) == 0 {
 		in.Files = ParseDiff(in.Diff)
 	}
+	// diff без заголовков файлов: проверки и RAG работали бы с пустым
+	// списком, а сверка отбросила бы все замечания — ревью выглядело бы
+	// «чистым», ничего не проверив (замечание собственного ревью).
+	if len(in.Files) == 0 {
+		return nil, errors.New("diff не разобрался на файлы — это не unified diff git")
+	}
 	res := &Result{Input: in}
 	add, del := 0, 0
 	for _, f := range in.Files {

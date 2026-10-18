@@ -74,6 +74,12 @@ func gofmtCheck(ctx context.Context, read Reader, files []File) Check {
 	return c
 }
 
+// envRef — строка, где значение берётся из окружения: «api_key_env: X»
+// или «${X}». Пропускать по одному «_env» в строке было слишком широко —
+// так прятался бы любой ключ рядом со словом env (замечание собственного
+// ревью).
+var envRef = regexp.MustCompile(`(?i)^\s*[a-z_]*_env\s*:\s*[A-Z0-9_]+\s*$|\$\{[A-Z0-9_]+\}`)
+
 var secretRE = []*regexp.Regexp{
 	regexp.MustCompile(`sk-[A-Za-z0-9_\-]{20,}`),
 	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{30,}`),
@@ -86,7 +92,7 @@ func secretsCheck(files []File) Check {
 	c := Check{Name: "секреты", OK: true}
 	for _, f := range files {
 		for i, line := range strings.Split(f.AddedText, "\n") {
-			if strings.Contains(line, "_env") || strings.Contains(line, "${") {
+			if envRef.MatchString(line) {
 				continue
 			}
 			for _, re := range secretRE {
