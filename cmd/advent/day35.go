@@ -31,6 +31,7 @@ import (
 	"github.com/safronov-a1exander/advent/internal/llm"
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/review"
+	"github.com/safronov-a1exander/advent/internal/servers/files"
 	"github.com/safronov-a1exander/advent/internal/servers/gitrepo"
 	"github.com/safronov-a1exander/advent/internal/ship"
 	"github.com/safronov-a1exander/advent/internal/store"
@@ -414,6 +415,12 @@ func readmeAgent(ctx context.Context, cfg *config.Config, client *llm.Client, pr
 		return ship.Result{Err: err}
 	}
 	defer w.Close()
+	// Без сервера files у редактора нет рук: на ветке дня 33 его ещё не
+	// было в config.yaml, модель нарисовала вызовы инструментов текстом,
+	// а ship отрапортовал «README поправлен». Нет инструментов — отказ.
+	if _, err := cfg.MCPServer("files"); err != nil {
+		return ship.Result{Err: fmt.Errorf("в config.yaml этой ветки нет MCP-сервера files (он с дня 34) — README поправит человек")}
+	}
 	hub := mcp.NewHub(cfg.MCPServers)
 	defer hub.Close()
 	pool := agent.NewPool(client, provName, w)
@@ -426,6 +433,11 @@ func readmeAgent(ctx context.Context, cfg *config.Config, client *llm.Client, pr
 	sp := pool.Spent()
 	if err != nil {
 		return ship.Result{Cost: sp.CostUSD, Err: err}
+	}
+	// Успех — это файл в черновике, а не слова модели «готово».
+	proj := &files.Project{Root: ".", Stage: filepath.FromSlash(StageDir)}
+	if staged, _ := proj.Staged(); len(staged) == 0 {
+		return ship.Result{Cost: sp.CostUSD, Err: fmt.Errorf("черновик пуст — правки не сделано; ответ модели: %s", clip(oneLine(reply.Final.Content), 160))}
 	}
 	return ship.Result{Cost: sp.CostUSD, Text: strings.TrimSpace(reply.Final.Content) + "\n\nПравка — в черновике: `advent files -diff`, применить — `advent files -apply`."}
 }
