@@ -152,11 +152,18 @@ function Resolve-Ffmpeg {
   $candidates = @()
   if ($env:ADVENT_FFMPEG_DIR) { $candidates += $env:ADVENT_FFMPEG_DIR }
   $candidates += @(
-    # full_build от gyan.dev, приехавший вместе с ow-electron/OBS
-    (Join-Path $env:APPDATA 'ow-electron\ekmbhgikmjbagjojiebkkbgghcedofnobpajodoi\packages\jjcifboncjjhdoooodcnhnenmmfgcnmpjanimpid\0.32.55\obs\bin\64bit'),
     (Join-Path $env:LOCALAPPDATA 'Programs\icat\resources\bin\ffmpeg'),
     'C:\ffmpeg\bin'
   )
+  # full_build от gyan.dev, приехавший вместе с ow-electron/OBS. Каталог
+  # версионированный и меняется с обновлением OBS (0.32.55 → 0.32.59),
+  # поэтому ищем шаблоном, свежие версии первыми.
+  $owRoot = Join-Path $env:APPDATA 'ow-electron\ekmbhgikmjbagjojiebkkbgghcedofnobpajodoi\packages\jjcifboncjjhdoooodcnhnenmmfgcnmpjanimpid'
+  if (Test-Path $owRoot) {
+    $candidates += (Get-ChildItem $owRoot -Directory -ErrorAction SilentlyContinue |
+      Sort-Object Name -Descending |
+      ForEach-Object { Join-Path $_.FullName 'obs\bin\64bit' })
+  }
   # winget ставит в версионированный каталог, поэтому его ищем шаблоном
   $wingetRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
   if (Test-Path $wingetRoot) {
@@ -170,6 +177,10 @@ function Resolve-Ffmpeg {
     $exe = Join-Path $dir 'ffmpeg.exe'
     $probe = Join-Path $dir 'ffprobe.exe'
     if ((Test-Path $exe) -and (Test-Path $probe)) {
+      # Запись и обрезка кодируют в libx264. Сборки из других приложений
+      # (icat, CapCut) бывают без него: ffmpeg стартует и тут же падает
+      # с «Unknown encoder 'libx264'», и видео не создаётся.
+      if (-not (& $exe -hide_banner -encoders 2>$null | Select-String -SimpleMatch 'libx264' -Quiet)) { continue }
       $env:PATH = "$dir;$env:PATH"
       if (-not $Quiet) { Write-Host "ffmpeg: $exe" -ForegroundColor DarkGray }
       return $exe

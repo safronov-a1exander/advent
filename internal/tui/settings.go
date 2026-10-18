@@ -70,6 +70,9 @@ type Settings struct {
 	RAGCite bool
 	// День 25 — раздел целиком вместо найденного куска.
 	RAGExpand bool
+	// RAGOpen — пустой поиск с цитатами не отказ, а ход без документации
+	// (день 31). В панели не показывается: это свойство ассистента, а не ручка.
+	RAGOpen bool
 
 	// День 12 — профиль пользователя: id и список доступных для перебора.
 	Profile  string
@@ -503,6 +506,7 @@ func (s *Settings) AgentConfig() agent.Config {
 		RAGRewrite:     s.RAGRewrite,
 		RAGCite:        s.RAGCite,
 		RAGExpand:      s.RAGExpand,
+		RAGOpen:        s.RAGOpen,
 	}.Clone()
 }
 
@@ -542,6 +546,7 @@ func (s *Settings) LoadConfig(c agent.Config) {
 	s.RAGRewrite = c.RAGRewrite
 	s.RAGCite = c.RAGCite
 	s.RAGExpand = c.RAGExpand
+	s.RAGOpen = c.RAGOpen
 }
 
 // Summary — короткая подпись отличий от значений по умолчанию.

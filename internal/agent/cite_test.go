@@ -179,3 +179,43 @@ func TestRewriteNoneSkipsSearchAndNamesConversationAsSource(t *testing.T) {
 		t.Fatal("без поиска нечего цитировать — режим цитат не включается")
 	}
 }
+
+// lastLLM запоминает последний запрос и отвечает текстом.
+type lastLLM struct{ last llm.Request }
+
+func (l *lastLLM) Name() string                                 { return "last" }
+func (l *lastLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (l *lastLLM) ChatStream(ctx context.Context, r llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return l.Chat(ctx, r)
+}
+func (l *lastLLM) Chat(_ context.Context, r llm.Request) (*llm.Response, error) {
+	l.last = r
+	return &llm.Response{Content: "На ветке изменены три файла."}, nil
+}
+
+func TestRAGOpenAsksModelWithoutDocsAndSaysSo(t *testing.T) {
+	llmc := &lastLLM{}
+	p := NewPool(llmc, "last", nil)
+	p.SetKnowledge(emptyKB{})
+	a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGCite: true, RAGOpen: true, RAGRerank: true, RAGMinRerank: llm.F(0.1)})
+	reply, err := a.Ask(context.Background(), "что изменилось на ветке?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Citation != nil {
+		t.Fatal("без фрагментов режим цитат не включается")
+	}
+	if llmc.last.ResponseFormat != nil {
+		t.Fatal("без цитат ответ — обычный текст, а не JSON")
+	}
+	q := llmc.last.Messages[len(llmc.last.Messages)-1].Content
+	if !strings.HasPrefix(q, NoDocsNote) || !strings.HasSuffix(q, "что изменилось на ветке?") {
+		t.Fatalf("модель должна знать, что документации нет: %q", q)
+	}
+	if !strings.HasSuffix(reply.Final.Content, NoDocsSource) {
+		t.Fatalf("источник ответа — не документация, и это надо сказать: %q", reply.Final.Content)
+	}
+	if h := a.History(); h[0].Content != "что изменилось на ветке?" {
+		t.Fatalf("в историю — голый вопрос: %q", h[0].Content)
+	}
+}

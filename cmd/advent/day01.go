@@ -477,6 +477,7 @@ func runTUI(ctx context.Context, a *askFlags, sf *sessionFlags, acts []tui.Actio
 	if a.devHelp {
 		opts.Help = devHelp(hub)
 		set.RAG = ""
+		set.RAGOpen = true
 	}
 
 	m := tui.NewModel(opts)

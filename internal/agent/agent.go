@@ -477,6 +477,12 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	// и проверяет, — потоком его показывать нельзя. А если ни один фрагмент
 	// не прошёл порог, модель не спрашивают вовсе: «не знаю» говорит код.
 	cite := cfg.RAG != "" && cfg.RAGCite && found != nil
+	// День 31: с RAGOpen пустой поиск — не отказ, а ход без документации.
+	noDocs := cite && len(hits) == 0 && cfg.RAGOpen
+	if noDocs {
+		cite = false
+		question = NoDocsNote + "\n\n" + text
+	}
 	if cite && len(hits) == 0 {
 		content := dontKnow(cfg, found)
 		on(Event{Kind: EventChunk, Content: content})
@@ -581,6 +587,11 @@ func (a *Agent) Ask(ctx context.Context, text string, on func(Event)) (*Reply, e
 	if skipped {
 		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + ConversationSource
 		on(Event{Kind: EventChunk, Content: "\n\n" + ConversationSource})
+	}
+
+	if noDocs {
+		reply.Final.Content = strings.TrimRight(reply.Final.Content, "\n") + "\n\n" + NoDocsSource
+		on(Event{Kind: EventChunk, Content: "\n\n" + NoDocsSource})
 	}
 
 	// День 24: JSON с источниками и цитатами — в текст для человека,

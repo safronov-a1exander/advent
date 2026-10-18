@@ -306,6 +306,7 @@ rag:
       include:
         - README.md
         - docs/RUNBOOK.md
+        - docs/ARCHITECTURE.md
         - docs/days/*.md
         - config.yaml
         - cmd/advent/main.go
