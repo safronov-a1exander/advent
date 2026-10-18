@@ -215,6 +215,9 @@ func ParseCitation(content, question string, hits []rag.Hit) *Citation {
 
 // Render — то, что увидит пользователь и что ляжет в историю: ответ,
 // источники с разделами, цитаты и итог проверки.
+// MaxShownQuotes — сколько дословных цитат показывать под ответом (день 31).
+const MaxShownQuotes = 4
+
 func (c *Citation) Render(hits []rag.Hit) string {
 	if c.Malformed {
 		return c.Answer
@@ -240,12 +243,25 @@ func (c *Citation) Render(hits []rag.Hit) string {
 	}
 	if len(c.Quotes) > 0 {
 		b.WriteString("\n\nЦитаты:")
+		// День 31: на обзорный вопрос модель приносит по цитате на каждый
+		// пункт, и полтора десятка строк выталкивают сам ответ за край
+		// экрана. Непроверенные видны всегда, дословных — первые
+		// MaxShownQuotes; проверка ниже считает все.
+		shown, hidden := 0, 0
 		for _, q := range c.Quotes {
 			mark := ""
 			if !q.Verbatim {
 				mark = " ✗ нет во фрагменте"
+			} else if shown >= MaxShownQuotes {
+				hidden++
+				continue
+			} else {
+				shown++
 			}
 			fmt.Fprintf(&b, "\n- [%s] «%s»%s", q.ID, oneLineText(q.Text), mark)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(&b, "\n- … и ещё %d — тоже дословно", hidden)
 		}
 	}
 	if p := c.Problems(); len(p) > 0 {

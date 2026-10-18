@@ -219,3 +219,18 @@ func TestRAGOpenAsksModelWithoutDocsAndSaysSo(t *testing.T) {
 		t.Fatalf("в историю — голый вопрос: %q", h[0].Content)
 	}
 }
+
+func TestRenderShowsFewVerbatimQuotesButAllBroken(t *testing.T) {
+	c := &Citation{Known: true, Answer: "ответ"}
+	for i := 0; i < 7; i++ {
+		c.Quotes = append(c.Quotes, Quote{ID: "a#0", Text: "дословно", Verbatim: true})
+	}
+	c.Quotes = append(c.Quotes, Quote{ID: "a#1", Text: "выдумано"})
+	got := c.Render(nil)
+	if n := strings.Count(got, "«дословно»"); n != MaxShownQuotes {
+		t.Fatalf("дословных показано %d, ждали %d:\n%s", n, MaxShownQuotes, got)
+	}
+	if !strings.Contains(got, "«выдумано» ✗") || !strings.Contains(got, "ещё 3 — тоже дословно") {
+		t.Fatalf("непроверенная цитата и счёт скрытых должны быть видны:\n%s", got)
+	}
+}
