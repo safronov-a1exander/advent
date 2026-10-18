@@ -166,7 +166,7 @@ func TestSummarizeAlertsOnDoubleCost(t *testing.T) {
 func TestSecretsCheckSkipsOnlyEnvReferences(t *testing.T) {
 	fs := []File{{Path: "config.yaml", AddedText: "    api_key_env: DEEPSEEK_API_KEY\n" +
 		"      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}\n" +
-		"    token_env_note: abcdefghijklmnopqrstu\n"}}
+		"    token: abcdefghijklmnopqrstuv  # потом перенести в _env\n"}}
 	c := secretsCheck(fs)
 	if c.OK || len(c.Details) != 1 || !strings.Contains(c.Details[0], "строке 3") {
 		t.Fatalf("ссылки на окружение пропускаются, ключ рядом со словом env — нет: %+v", c)
