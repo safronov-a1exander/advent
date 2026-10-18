@@ -102,6 +102,14 @@ func cmdShip(ctx context.Context, args []string) error {
 			logLine("⚠ README поправлен в черновике — посмотри diff и примени: advent files -apply, затем коммит")
 		}
 	}
+	// Что сделали субагенты — на экран коротко, в отчёт целиком.
+	for _, r := range results {
+		if r.Err != nil {
+			continue
+		}
+		fmt.Printf("\n── %s ──\n%s\n", r.Name, shortText(r))
+	}
+	fmt.Println()
 	actions, bodyPath, err := shipActions(ctx, repo, cfg, day, checks, desc)
 	if err != nil {
 		return err
@@ -552,4 +560,19 @@ func clipRunesMain(s string, n int) string {
 		return string(r[:n]) + "\n…"
 	}
 	return s
+}
+
+// shortText — итог субагента для консоли: у ревьюера — вердикт и баги,
+// у остальных — текст целиком (он и так короткий).
+func shortText(r ship.Result) string {
+	if r.Name != "ревьюер" {
+		return strings.TrimSpace(r.Text)
+	}
+	var keep []string
+	for _, l := range strings.Split(r.Text, "\n") {
+		if strings.HasPrefix(l, "вердикт") || strings.HasPrefix(l, "- 🔴") || strings.HasPrefix(l, "- 🟠") {
+			keep = append(keep, clip(l, 220))
+		}
+	}
+	return strings.Join(keep, "\n") + "\nцеликом — в отчёте"
 }
