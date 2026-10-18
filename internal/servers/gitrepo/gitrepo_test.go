@@ -105,6 +105,19 @@ func TestDiffAgainstBaseAndWorkingCopy(t *testing.T) {
 	}
 }
 
+func TestRefIsOnlyBranchOrCommit(t *testing.T) {
+	for _, ok := range []string{"main", "day-30", "feature/x", "v1.2", "8c0a60f"} {
+		if _, err := ref(ok); err != nil {
+			t.Errorf("%q — нормальное имя: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"--output=x", "main..HEAD", "HEAD~3", "HEAD^", "HEAD:go.mod", "a b", "@{-1}"} {
+		if _, err := ref(bad); err == nil {
+			t.Errorf("%q пропущено", bad)
+		}
+	}
+}
+
 func TestRefCannotBecomeFlag(t *testing.T) {
 	dir := repo(t)
 	out, bad := call(t, dir, "diff", `{"base":"--output=x.txt"}`)

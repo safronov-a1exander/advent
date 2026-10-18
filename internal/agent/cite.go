@@ -343,7 +343,6 @@ func bestFirst(hits []rag.Hit, byRerank bool) []rag.Hit {
 // а не пересказ.
 func squashQuote(s string) string {
 	s = listMarkRe.ReplaceAllString(s, "")
-	s = listMarkRe.ReplaceAllString(s, "")
 	r := strings.NewReplacer("**", "", "`", "", "«", "", "»", "", "\"", "", "„", "", "“", "", "ё", "е", "Ё", "е", "—", "-", "–", "-", " ", " ", " ", " ")
 	s = strings.ToLower(r.Replace(s))
 	s = strings.Join(strings.Fields(s), " ")
