@@ -70,6 +70,11 @@ type Options struct {
 	// Notice — строка в начало ленты: например, что часть разговоров
 	// не удалось прочитать.
 	Notice string
+
+	// Help — команда /help ассистента разработчика (день 31): вопрос
+	// о проекте с базой знаний и состоянием git. nil — /help уходит
+	// в разговор обычной репликой.
+	Help *Help
 }
 
 type focusTarget int
@@ -137,6 +142,9 @@ type Model struct {
 	// lastQuestion — последний заданный вопрос; по Ctrl+E он уходит
 	// на все модели сразу (задание дня 5).
 	lastQuestion string
+	// turnSystem — добавка к системному промпту на один ход: состояние
+	// репозитория для /help (день 31). send забирает её и обнуляет.
+	turnSystem string
 }
 
 func NewModel(o Options) *Model {
@@ -406,6 +414,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.follow = true
 		// Команды памяти (день 11) в модель не уходят: это правка памяти
 		// агента, а не реплика разговора.
+		// /help ассистента разработчика (день 31) — вопрос о проекте.
+		if cmd, ok := m.helpCommand(text); ok {
+			return m, cmd
+		}
 		if m.memoryCommand(text) {
 			return m, nil
 		}
@@ -669,6 +681,10 @@ func (m *Model) send(text string) tea.Cmd {
 	// Панель живёт в главном цикле и может поменяться, пока агент отвечает,
 	// поэтому конфиг отдаём агенту до старта, а подпись снимаем здесь же.
 	cfg := m.set.AgentConfig()
+	if m.turnSystem != "" {
+		cfg.System = strings.TrimSpace(cfg.System + "\n\n" + m.turnSystem)
+		m.turnSystem = ""
+	}
 	m.ag.SetConfig(cfg)
 	ag := m.ag
 	m.lastQuestion = text

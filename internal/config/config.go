@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/safronov-a1exander/advent/internal/llm"
@@ -291,6 +292,9 @@ type RAGConfig struct {
 	Sources  rag.Sources  `yaml:"sources"`
 	Chunking rag.Chunking `yaml:"chunking"`
 	Strategy rag.Strategy `yaml:"strategy"`
+	// Bases — отдельные базы под задачу (день 31): у каждой свои источники
+	// и свой каталог индекса IndexDir/<имя>. Нарезка и модели — общие.
+	Bases map[string]rag.Sources `yaml:"bases"`
 }
 
 // Embedder — клиент эмбеддингов по имени; пусто — rag.embedder.
@@ -329,4 +333,23 @@ func (c *Config) Reranker(name string) (*rag.HTTPReranker, error) {
 		names = append(names, r.Name)
 	}
 	return nil, fmt.Errorf("реранкер %q не найден в config.yaml (есть: %s)", name, strings.Join(names, ", "))
+}
+
+// Base — источники и каталог индекса базы знаний name (день 31).
+// Пустое имя — основная база из rag.sources, как было с двадцать
+// первого дня.
+func (c *Config) Base(name string) (rag.Sources, string, error) {
+	if name == "" {
+		return c.RAG.Sources, c.RAG.IndexDir, nil
+	}
+	src, ok := c.RAG.Bases[name]
+	if !ok {
+		names := make([]string, 0, len(c.RAG.Bases))
+		for n := range c.RAG.Bases {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		return rag.Sources{}, "", fmt.Errorf("базы знаний %q нет в rag.bases (есть: %s)", name, strings.Join(names, ", "))
+	}
+	return src, filepath.Join(c.RAG.IndexDir, name), nil
 }

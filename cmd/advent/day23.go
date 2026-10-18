@@ -54,7 +54,7 @@ func cmdRetrieval(ctx context.Context, args []string) error {
 	if prov == "" {
 		prov = cfg.DefaultProvider
 	}
-	kb, err := knowledgeFor(cfg, *embName, prov)
+	kb, err := knowledgeFor(cfg, *embName, prov, "")
 	if err != nil {
 		return err
 	}

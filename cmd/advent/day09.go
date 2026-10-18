@@ -87,7 +87,7 @@ func cmdDialog(ctx context.Context, args []string) error {
 	pool.SetToolbox(hub)
 	// День 22: база знаний. Пользуются ей только варианты с rag: on,
 	// а индекс читается при первом их вопросе.
-	kb, err := knowledgeFor(cfg, *embName, prov.Name)
+	kb, err := knowledgeFor(cfg, *embName, prov.Name, "")
 	if err != nil {
 		return err
 	}

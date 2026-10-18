@@ -12,7 +12,12 @@ import (
 // посчитанный моделью embName, и реранкер rag.reranker (день 23). На
 // заглушке-провайдере и эмбеддинги, и реранкер по умолчанию берутся
 // у заглушки: репетиция не должна требовать видеокарты.
-func knowledgeFor(cfg *config.Config, embName, provider string) (*rag.Retriever, error) {
+// base — отдельная база из rag.bases (день 31); пусто — основная.
+func knowledgeFor(cfg *config.Config, embName, provider, base string) (*rag.Retriever, error) {
+	_, indexDir, err := cfg.Base(base)
+	if err != nil {
+		return nil, err
+	}
 	rrName := ""
 	if embName == "" && provider == "mock" {
 		embName, rrName = "mock", "mock"
@@ -27,5 +32,5 @@ func knowledgeFor(cfg *config.Config, embName, provider string) (*rag.Retriever,
 	if r, err := cfg.Reranker(rrName); err == nil {
 		rr = r
 	}
-	return rag.NewRetriever(rag.Path(cfg.RAG.IndexDir, emb.Name(), cfg.RAG.Strategy), emb, rr), nil
+	return rag.NewRetriever(rag.Path(indexDir, emb.Name(), cfg.RAG.Strategy), emb, rr), nil
 }
