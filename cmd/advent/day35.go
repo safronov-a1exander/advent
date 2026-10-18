@@ -110,7 +110,7 @@ func cmdShip(ctx context.Context, args []string) error {
 		fmt.Printf("\n── %s ──\n%s\n", r.Name, shortText(r))
 	}
 	fmt.Println()
-	actions, bodyPath, err := shipActions(ctx, repo, cfg, day, checks, desc)
+	actions, _, err := shipActions(ctx, repo, cfg, day, checks, desc)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func cmdShip(ctx context.Context, args []string) error {
 		return writeShip(cfg, day, checks, results, actions, false)
 	}
 	for _, a := range actions {
-		if err := runAction(ctx, a, bodyPath); err != nil {
+		if err := runAction(ctx, repo.Root, a); err != nil {
 			logLine("✗ %s: %v — остальное не выполняю", a, err)
 			return writeShip(cfg, day, checks, results, actions, false)
 		}
@@ -253,7 +253,10 @@ func videoCheck(ctx context.Context, cfg *config.Config, d ship.Day) (string, sh
 	}
 	sort.Strings(matches)
 	v := matches[len(matches)-1]
-	fi, _ := os.Stat(v)
+	fi, err := os.Stat(v)
+	if err != nil {
+		return "видео", ship.Fail, err.Error(), ""
+	}
 	if fi.Size() < 100<<10 {
 		return "видео", ship.Fail, fmt.Sprintf("%s — %d байт, запись битая", filepath.ToSlash(v), fi.Size()), ""
 	}
@@ -301,7 +304,9 @@ func pushChecks(ctx context.Context, repo *gitrepo.Repo, d ship.Day, cs []ship.C
 			State  string
 			URL    string
 		}
-		json.Unmarshal(out, &prs)
+		if err := json.Unmarshal(out, &prs); err != nil {
+			return append(cs, ship.Check{Name: "PR", Status: ship.Warn, Detail: "ответ gh не разобрать: " + err.Error()})
+		}
 		if len(prs) > 0 {
 			cs = append(cs, ship.Check{Name: "PR", Status: ship.OK, Detail: fmt.Sprintf("#%d %s", prs[0].Number, strings.ToLower(prs[0].State))})
 			return cs
@@ -448,8 +453,11 @@ func shipActions(ctx context.Context, repo *gitrepo.Repo, cfg *config.Config, d 
 	}
 	// PR в main, если предыдущий день туда уже влит; иначе — стеком
 	// в ветку предыдущего дня, чтобы в diff был только этот шаг.
+	// Без сети молча выбрать base нельзя: PR открылся бы не туда.
+	if _, err := repo.Git(ctx, "fetch", "--quiet", "origin", "main"); err != nil {
+		return nil, "", fmt.Errorf("не узнать, влит ли %s в main: %w", d.Prev, err)
+	}
 	base := "main"
-	repo.Git(ctx, "fetch", "--quiet", "origin", "main")
 	if _, err := repo.Git(ctx, "merge-base", "--is-ancestor", d.Prev, "origin/main"); err != nil {
 		base = d.Prev
 	}
@@ -466,11 +474,17 @@ func shipActions(ctx context.Context, repo *gitrepo.Repo, cfg *config.Config, d 
 
 // runAction выполняет одну строку плана. Разбор — свой и простой: план
 // пишет код выше, а не модель, так что в нём только известные команды.
-func runAction(ctx context.Context, a, bodyPath string) error {
+//
+// git — из корня репозитория, а не из текущего каталога: с -dir push ушёл
+// бы не туда (замечание ревьюера на сдаче этого же дня).
+func runAction(ctx context.Context, root, a string) error {
 	switch {
 	case strings.HasPrefix(a, "git push "):
-		_, err := runCmd(ctx, ".", "git", strings.Fields(a)[1:]...)
-		return err
+		out, err := runCmd(ctx, root, "git", strings.Fields(a)[1:]...)
+		if err != nil {
+			return fmt.Errorf("%v: %s", err, lastLines(out, 2))
+		}
+		return nil
 	case strings.HasPrefix(a, "gh pr create "):
 		args, err := splitQuoted(strings.TrimPrefix(a, "gh "))
 		if err != nil {
