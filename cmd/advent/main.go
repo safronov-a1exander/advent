@@ -45,7 +45,7 @@ func usage() {
   task      состояние задачи: стадия, шаг, план               (день 13)
   invariants ограничения, которые нельзя нарушать            (день 14)
   mcp       подключиться к MCP-серверам и показать инструменты (день 16)
-  mcp-server свой MCP-сервер стенда: rates, budget, goals, git, crm (stdio или -http) (день 17–33)
+  mcp-server свой MCP-сервер стенда: rates, budget, goals, git, crm, files (stdio или -http) (день 17–34)
   watch     агент сам присылает сводку по расписанию          (день 18)
   index     база знаний: нарезка, эмбеддинги, индекс         (день 21)
   search    ближайшие к вопросу чанки из индекса             (день 21)
@@ -56,6 +56,7 @@ func usage() {
   dev       ассистент разработчика: /help по документации и git проекта (день 31)
   review    AI-ревью PR или ветки: diff, RAG, проверки кодом, комментарий в PR (день 32)
   support   поддержка пользователей: FAQ в RAG, CRM по MCP, чат по обращению или страница (день 33)
+  files     ассистент по файлам проекта: цель → поиск, чтение, правки в черновик → diff (день 34)
   models    список моделей провайдера (живой запрос GET /models) и прайс из конфига
   doctor    проверка окружения: конфиг, ключ, доступность API
   version   версия сборки
@@ -82,6 +83,8 @@ func run() error {
 		return cmdAsk(ctx, args)
 	case "dev":
 		return cmdDev(ctx, args)
+	case "files":
+		return cmdFiles(ctx, args)
 	case "support":
 		return cmdSupport(ctx, args)
 	case "review":

@@ -163,3 +163,21 @@ func TestNoMCPNoTools(t *testing.T) {
 		t.Fatal("агенту без серверов функции не положены")
 	}
 }
+
+// Свой лимит кругов агента (день 34) — вместо общего.
+func TestOwnToolRoundsLimit(t *testing.T) {
+	var resps []*llm.Response
+	for i := 0; i < 30; i++ {
+		resps = append(resps, wants("c", "rates__convert", `{}`))
+	}
+	m := &scriptLLM{resps: resps}
+	pool := NewPool(m, "t", nil)
+	pool.SetToolbox(&fakeBox{})
+	a := pool.Spawn(Config{Name: "b", Model: "m", MCP: []string{"rates"}, MaxToolRounds: 12})
+	if _, err := a.Ask(context.Background(), "?", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.reqs) != 13 {
+		t.Fatalf("запросов: %d, ждали 13", len(m.reqs))
+	}
+}

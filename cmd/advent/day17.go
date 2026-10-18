@@ -14,12 +14,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/safronov-a1exander/advent/internal/mcp"
 	"github.com/safronov-a1exander/advent/internal/servers/budget"
 	"github.com/safronov-a1exander/advent/internal/servers/crm"
+	"github.com/safronov-a1exander/advent/internal/servers/files"
 	"github.com/safronov-a1exander/advent/internal/servers/gitrepo"
 	"github.com/safronov-a1exander/advent/internal/servers/goals"
 	"github.com/safronov-a1exander/advent/internal/servers/rates"
@@ -39,6 +41,7 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 	goalsData := fs.String("goals", "runs/mcp/goals.json", "goals: файл целей (день 20)")
 	market := fs.String("market", "coinbase", "откуда брать рыночный курс для слежения: coinbase | walk (подставной, для репетиций)")
 	repoRoot := fs.String("repo", ".", "git: каталог репозитория (день 31)")
+	stage := fs.String("stage", "runs/files/stage", "files: черновик правок ассистента (день 34)")
 	crmSeed := fs.String("crm", "data/support/crm.json", "crm: исходные данные CRM в репозитории (день 33)")
 	crmState := fs.String("crm-state", "runs/support/crm.json", "crm: рабочая копия — сюда пишутся заметки и статусы")
 	// Имя сервера — первый аргумент, флаги можно писать и после него.
@@ -84,6 +87,12 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 		srv = g
 	case "git":
 		srv = gitrepo.New(*repoRoot)
+	case "files":
+		root, err := filepath.Abs(*repoRoot)
+		if err != nil {
+			return err
+		}
+		srv = files.New(&files.Project{Root: root, Stage: filepath.Join(root, filepath.FromSlash(*stage))})
 	case "crm":
 		st, err := crm.Open(*crmSeed, *crmState, nil)
 		if err != nil {
@@ -91,7 +100,7 @@ func cmdMCPServer(ctx context.Context, args []string) error {
 		}
 		srv = crm.New(st)
 	default:
-		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals, git, crm", name)
+		return fmt.Errorf("неизвестный сервер %q; есть: rates, budget, goals, git, crm, files", name)
 	}
 	// stdout занят протоколом: любая строка туда ломает клиенту разбор.
 	// Всё остальное — только в stderr.
