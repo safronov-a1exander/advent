@@ -29,6 +29,11 @@ type Options struct {
 	MinRerank float32
 	// Expand — отдать в запрос раздел целиком, а не найденный кусок (день 25).
 	Expand bool
+	// RerankQuery — с чем реранкер сравнивает фрагменты, если не с поисковым
+	// запросом (день 31). Кросс-энкодер обучен на вопросах, а rewrite
+	// превращает вопрос в набор ключевых слов: «структура проекта основные
+	// каталоги назначение» — карта проекта 0.04, тот же вопрос словами — 0.94.
+	RerankQuery string
 }
 
 // Result — что нашлось и что из этого отобрано.
@@ -104,10 +109,15 @@ func Search(ctx context.Context, ix *Index, emb Embedder, rr Reranker, query str
 	if err != nil {
 		return nil, err
 	}
-	res, err := Select(ctx, rr, query, cands, o)
+	rq := query
+	if o.RerankQuery != "" {
+		rq = o.RerankQuery
+	}
+	res, err := Select(ctx, rr, rq, cands, o)
 	if err != nil {
 		return nil, err
 	}
+	res.Query = query
 	if o.Expand {
 		res.Kept = expandAll(ix, res.Kept)
 	}

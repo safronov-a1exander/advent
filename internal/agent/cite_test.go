@@ -244,7 +244,7 @@ func (r *toolsRouteLLM) ChatStream(ctx context.Context, q llm.Request, _ func(ll
 	return r.Chat(ctx, q)
 }
 func (r *toolsRouteLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
-	if strings.HasPrefix(q.Messages[0].Content, "Ты переписываешь вопрос") {
+	if strings.Contains(q.Messages[0].Content, "Ты переписываешь вопрос") {
 		r.sawTools = strings.Contains(q.Messages[0].Content, "rates.convert")
 		return &llm.Response{Content: "TOOLS"}, nil
 	}
@@ -295,5 +295,46 @@ func TestQuoteAcrossListItemsIsVerbatim(t *testing.T) {
 	}
 	if strings.Contains(squashQuote("стоимость - 5 рублей"), squashQuote("стоимость 5 рублей")) {
 		t.Fatal("тире внутри строки — не маркер списка")
+	}
+}
+
+type optsKB struct{ got rag.Options }
+
+func (k *optsKB) Retrieve(_ context.Context, q string, o rag.Options) (*rag.Result, error) {
+	k.got = o
+	return &rag.Result{Query: q}, nil
+}
+
+// rewriteLLM переписывает вопрос в ключевые слова.
+type rewriteLLM struct{}
+
+func (rewriteLLM) Name() string                                 { return "rw" }
+func (rewriteLLM) ListModels(context.Context) ([]string, error) { return nil, nil }
+func (r rewriteLLM) ChatStream(ctx context.Context, q llm.Request, _ func(llm.Chunk) error) (*llm.Response, error) {
+	return r.Chat(ctx, q)
+}
+func (rewriteLLM) Chat(_ context.Context, q llm.Request) (*llm.Response, error) {
+	if strings.Contains(q.Messages[0].Content, "Ты переписываешь вопрос") {
+		return &llm.Response{Content: "структура проекта каталоги"}, nil
+	}
+	return &llm.Response{Content: "ответ"}, nil
+}
+
+func TestRerankQuestionKeepsOriginalForCrossEncoder(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		kb := &optsKB{}
+		p := NewPool(rewriteLLM{}, "rw", nil)
+		p.SetKnowledge(kb)
+		a := p.SpawnTemp(Config{Model: "m", RAG: "on", RAGRewrite: true, RAGRerank: true, RAGRerankQuestion: on})
+		if _, err := a.Ask(context.Background(), "Как устроен проект?", nil); err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if on {
+			want = "Как устроен проект? (структура проекта каталоги)"
+		}
+		if kb.got.RerankQuery != want {
+			t.Fatalf("rag_rerank_question=%v: реранк по %q, ждали %q", on, kb.got.RerankQuery, want)
+		}
 	}
 }

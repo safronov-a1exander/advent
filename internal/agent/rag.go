@@ -95,7 +95,11 @@ func (a *Agent) retrieve(ctx context.Context, cfg Config, mem *memory.Memory, hi
 			return nil, SkipTools
 		}
 	}
-	res, err := kb.Retrieve(ctx, query, cfg.ragOptions())
+	o := cfg.ragOptions()
+	if cfg.RAGRerankQuestion && query != text {
+		o.RerankQuery = text + " (" + query + ")"
+	}
+	res, err := kb.Retrieve(ctx, query, o)
 	if err != nil {
 		on(Event{Kind: EventRetrieval, Label: "база знаний недоступна", Content: err.Error(), Failed: true})
 		return nil, ""
@@ -297,24 +301,30 @@ func RewriteQuery(ctx context.Context, client llm.Provider, model, memo string, 
 	return rewriteWithTools(ctx, client, model, memo, hist, text, nil)
 }
 
-// rewriteToolsRule — добавка к rewriteSystem, когда у хода есть
-// инструменты (день 31). Только тогда: агентам без инструментов маршрут
-// TOOLS не нужен, и замеры дней 23–25 остаются как были.
-const rewriteToolsRule = `
-- У ассистента есть инструменты (список ниже). Если вопрос о текущем состоянии, которое знают они, а не документация, — что сейчас, что изменилось, что есть прямо сейчас, — верни ровно TOOLS. Вопрос о том, как что устроено или зачем сделано, — это поиск в базе, а не TOOLS.
+// rewriteToolsRoute — роутер перед rewrite, когда у хода есть инструменты
+// (день 31). Только тогда: агентам без инструментов маршрут TOOLS не
+// нужен, и замеры дней 23–25 остаются как были.
+//
+// Первая версия была ещё одним пунктом в конце списка правил rewrite,
+// и модель его пропускала: «что сделано на этой ветке?» переписывалось
+// в запрос к базе. Решение о маршруте стоит первым и с примерами.
+const rewriteToolsRoute = `Сначала реши, куда идёт вопрос.
+У ассистента есть инструменты — они показывают текущее состояние:
+%s
+Если ответ на вопрос — это текущее состояние, которое показывают инструменты (что сейчас, что изменилось, какие файлы есть или изменены, какая ветка, последние коммиты), верни ровно TOOLS и больше ничего.
+Если вопрос о том, как что устроено, зачем сделано, что написано в документации, — переписывай его в запрос к базе по правилам ниже.
+Примеры: «что сделано на этой ветке?» → TOOLS; «какие файлы я поменял?» → TOOLS; «на какой мы ветке?» → TOOLS; «как устроен поиск по базе?» → запрос к базе; «зачем флаг -handoff?» → запрос к базе.
 
-Инструменты:
 `
 
 func rewriteWithTools(ctx context.Context, client llm.Provider, model, memo string, hist []llm.Message, text string, funcs []llm.Tool) (string, llm.Request, *llm.Response, error) {
 	system := rewriteSystem
 	if len(funcs) > 0 {
 		var t strings.Builder
-		t.WriteString(rewriteToolsRule)
 		for _, f := range funcs {
 			fmt.Fprintf(&t, "- %s: %s\n", displayName(f.Function.Name), clipRunes(f.Function.Description, 160))
 		}
-		system += t.String()
+		system = fmt.Sprintf(rewriteToolsRoute, strings.TrimRight(t.String(), "\n")) + rewriteSystem
 	}
 	var b strings.Builder
 	if memo != "" {
